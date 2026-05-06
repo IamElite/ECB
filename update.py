@@ -1,42 +1,57 @@
-import subprocess
 import os
 import sys
-import tarfile
+import zipfile
+import shutil
 import tempfile
-import json
-import time
+from urllib import request
 
-REPO_URL = "https://github.com/IamElite/ECB.git"
+UPSTREAM_REPO = os.environ.get("UPSTREAM_REPO", "https://github.com/IamElite/ECB")
+UPSTREAM_BRANCH = os.environ.get("UPSTREAM_BRANCH", "main")
 
-def run(cmd, check=True):
-    print(f"\n>> {cmd}")
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr)
-    if check and result.returncode != 0:
-        print(f"[FAIL] Code: {result.returncode}")
-        sys.exit(1)
-    return result
+def update_from_repo():
+    print("[UPDATE] Checking for updates...")
 
-def main():
-    print("=" * 40)
-    print("ENCODER BOT AUTO DEPLOY")
-    print("=" * 40)
+    clean_repo = UPSTREAM_REPO.rstrip("/")
+    if clean_repo.endswith(".git"):
+        clean_repo = clean_repo[:-4]
 
-    if not os.path.exists(".git"):
-        run("git init")
-        run(f"git remote add origin {REPO_URL}")
+    zip_url = f"{clean_repo}/archive/refs/heads/{UPSTREAM_BRANCH}.zip"
+    print(f"[UPDATE] Downloading from: {zip_url}")
 
-    run("git add .")
-    run('git commit -m "auto: update deploy"')
-    run("git branch -M main")
-    run("git push -u origin main --force")
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = os.path.join(tmp, "update.zip")
+        extract_path = os.path.join(tmp, "extracted")
+        os.makedirs(extract_path)
 
-    print("\n" + "=" * 40)
-    print("[OK] GitHub push done!")
-    print("=" * 40)
+        try:
+            request.urlretrieve(zip_url, zip_path)
+        except Exception as e:
+            print(f"[UPDATE FAIL] {e}")
+            return False
 
-if __name__ == "__main__":
-    main()
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(extract_path)
+
+        root_folder = os.listdir(extract_path)[0]
+        root_path = os.path.join(extract_path, root_folder)
+
+        skip = {".git", "__pycache__", ".env"}
+
+        for item in os.listdir(root_path):
+            if item in skip:
+                continue
+            s = os.path.join(root_path, item)
+            d = os.path.join(".", item)
+            if os.path.isdir(s):
+                if os.path.exists(d):
+                    shutil.rmtree(d)
+                shutil.move(s, d)
+            else:
+                if os.path.exists(d):
+                    os.remove(d)
+                shutil.move(s, d)
+
+    print("[UPDATE] Update applied successfully!")
+    return True
+
+update_from_repo()

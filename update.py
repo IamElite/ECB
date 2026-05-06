@@ -3,6 +3,7 @@ import sys
 import zipfile
 import shutil
 import tempfile
+import subprocess
 from urllib import request
 
 UPSTREAM_REPO = os.environ.get("UPSTREAM_REPO", "https://github.com/IamElite/ECB")
@@ -51,5 +52,14 @@ def update_from_repo():
                     os.remove(d)
                 shutil.move(s, d)
 
+    if os.path.exists("requirements.txt"):
+        print("[UPDATE] requirements.txt found, installing dependencies...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"])
+        print("[UPDATE] Dependencies installed!")
+    else:
+        print("[UPDATE] No requirements.txt found, skipping pip install.")
+
     print("[UPDATE] Update applied successfully!")
     return True
+
+update_from_repo()

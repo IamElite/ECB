@@ -61,5 +61,3 @@ def update_from_repo():
 
     print("[UPDATE] Update applied successfully!")
     return True
-
-update_from_repo()

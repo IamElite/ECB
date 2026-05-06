@@ -1,14 +1,21 @@
 import asyncio
-import os
-import shutil
-import zipfile
-import tempfile
-import time
 import math
+import os
 import random
+import shutil
+import time
 from hashlib import md5
+from mimetypes import guess_extension
 from pathlib import Path
-from urllib import request
+from re import sub
+
+from aiofiles import open as aiopen
+from aiofiles.os import makedirs, remove
+from pyrogram import raw, utils
+from pyrogram.errors import AuthBytesInvalid, FloodWait
+from pyrogram.file_id import PHOTO_TYPES, FileId, FileType, ThumbnailSource
+from pyrogram.session import Auth, Session
+from pyrogram.session.internals import MsgId
 from asyncio import (
     CancelledError,
     create_task,
@@ -21,76 +28,29 @@ from asyncio import (
     Queue,
     Semaphore,
 )
-from mimetypes import guess_extension
-from re import sub
-
-from aiofiles import open as aiopen
-from aiofiles.os import makedirs, remove
-from pyrogram import raw, utils
-from pyrogram.errors import AuthBytesInvalid, FloodWait
-from pyrogram.file_id import PHOTO_TYPES, FileId, FileType, ThumbnailSource
-from pyrogram.session import Auth, Session
-from pyrogram.session.internals import MsgId
-
-UPSTREAM_REPO = os.environ.get("UPSTREAM_REPO", "https://github.com/IamElite/ECB")
-UPSTREAM_BRANCH = os.environ.get("UPSTREAM_BRANCH", "main")
 
 HYPER_UL_MIN_SIZE = 50 * 1024 * 1024
 
 
-def update_from_repo():
-    print("[UPDATE] Checking for updates...")
-    clean_repo = UPSTREAM_REPO.rstrip("/")
-    if clean_repo.endswith(".git"):
-        clean_repo = clean_repo[:-4]
-    zip_url = f"{clean_repo}/archive/refs/heads/{UPSTREAM_BRANCH}.zip"
-    print(f"[UPDATE] Downloading from: {zip_url}")
-    with tempfile.TemporaryDirectory() as tmp:
-        zip_path = os.path.join(tmp, "update.zip")
-        extract_path = os.path.join(tmp, "extracted")
-        os.makedirs(extract_path)
-        try:
-            request.urlretrieve(zip_url, zip_path)
-        except Exception as e:
-            print(f"[UPDATE FAIL] {e}")
-            return False
-        with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(extract_path)
-        root_folder = os.listdir(extract_path)[0]
-        root_path = os.path.join(extract_path, root_folder)
-        skip = {".git", "__pycache__", ".env"}
-        for item in os.listdir(root_path):
-            if item in skip:
-                continue
-            s = os.path.join(root_path, item)
-            d = os.path.join(".", item)
-            if os.path.isdir(s):
-                if os.path.exists(d):
-                    shutil.rmtree(d)
-                shutil.move(s, d)
-            else:
-                if os.path.exists(d):
-                    os.remove(d)
-                shutil.move(s, d)
-    print("[UPDATE] Update applied successfully!")
-    return True
-
-
 class HyperTGDownload:
+    """
+    Parallel Telegram downloader — file ko multiple parts me download karta hai
+    alag-alag media sessions se, fir merge karta hai.
+    WZML-XDZ se adapted for single-client bot.
+    """
+
     _load_lock = Lock()
 
     def __init__(self, client, num_parts=8):
         self.client = client
-        self.num_parts = num_parts
+        self.num_parts = min(num_parts or 8, 8)
         self._per_task_limit = 8
-        if not num_parts:
-            self.num_parts = min(self.num_parts, self._per_task_limit)
         self.cache_file_ref = {}
         self.cache_last_access = {}
         self.cache_max_size = 100
         self._processed_bytes = 0
         self.file_size = 0
-        self.chunk_size = 1024 * 1024
+        self.chunk_size = 1024 * 1024  # 1MB per chunk
         self.file_name = ""
         self._cancel_event = Event()
         self._session_lock = Lock()
@@ -109,9 +69,10 @@ class HyperTGDownload:
                 return media
         raise ValueError("This message doesn't contain any downloadable media")
 
-    def _update_cache(self, index, file_ref):
-        self.cache_file_ref[index] = file_ref
-        self.cache_last_access[index] = time.time()
+    def _update_cache(self, file_ref):
+        idx = 0
+        self.cache_file_ref[idx] = file_ref
+        self.cache_last_access[idx] = time.time()
         if len(self.cache_file_ref) > self.cache_max_size:
             oldest = sorted(self.cache_last_access.items(), key=lambda x: x[1])[0][0]
             del self.cache_file_ref[oldest]
@@ -128,15 +89,15 @@ class HyperTGDownload:
                 last_error = e
                 retries += 1
                 await sleep(1 * retries)
-        raise ValueError(f"Failed to get message {mid} from {self.dump_chat}. Error: {last_error}")
+        raise ValueError(f"Failed to get message {mid}. Error: {last_error}")
 
-    async def get_file_id(self, client, index) -> FileId:
-        if index not in self.cache_file_ref:
+    async def get_file_id(self, client) -> FileId:
+        if 0 not in self.cache_file_ref:
             file_ref = await self.get_specific_file_ref(self.message.id, client)
-            self._update_cache(index, file_ref)
+            self._update_cache(file_ref)
         else:
-            self.cache_last_access[index] = time.time()
-        return self.cache_file_ref[index]
+            self.cache_last_access[0] = time.time()
+        return self.cache_file_ref[0]
 
     async def _clean_cache(self):
         while True:
@@ -149,8 +110,8 @@ class HyperTGDownload:
                 if key in self.cache_last_access:
                     del self.cache_last_access[key]
 
-    async def generate_media_session(self, client, file_id, index, max_retries=3):
-        session_key = (index, file_id.dc_id)
+    async def generate_media_session(self, client, file_id, max_retries=3):
+        session_key = file_id.dc_id
         async with self._session_lock:
             if session_key in self.session_pool:
                 return self.session_pool[session_key]
@@ -194,23 +155,26 @@ class HyperTGDownload:
         else:
             return raw.types.InputDocumentFileLocation(id=file_id.media_id, access_hash=file_id.access_hash, file_reference=file_id.file_reference, thumb_size=file_id.thumbnail_size)
 
-    async def get_file(self, offset_bytes: int, first_part_cut: int, last_part_cut: int, part_count: int, max_retries=5):
-        async with self._load_lock:
-            index = 0
-            client = self.client
-        current_retry = 0
+    async def get_file(self, offset_bytes, first_part_cut, last_part_cut, part_count, max_retries=5):
+        client = self.client
         try:
             if self._cancel_event.is_set():
                 raise CancelledError("Download cancelled")
-            file_id = await self.get_file_id(client, index)
-            media_session, location = await gather(self.generate_media_session(client, file_id, index), self.get_location(file_id))
+            file_id = await self.get_file_id(client)
+            media_session, location = await gather(
+                self.generate_media_session(client, file_id),
+                self.get_location(file_id),
+            )
             current_part = 1
             current_offset = offset_bytes
             while current_part <= part_count:
                 if self._cancel_event.is_set():
                     raise CancelledError("Download cancelled")
                 try:
-                    r = await wait_for(media_session.invoke(raw.functions.upload.GetFile(location=location, offset=current_offset, limit=self.chunk_size)), timeout=60)
+                    r = await wait_for(
+                        media_session.invoke(raw.functions.upload.GetFile(location=location, offset=current_offset, limit=self.chunk_size)),
+                        timeout=60,
+                    )
                     if isinstance(r, raw.types.upload.File):
                         chunk = r.bytes
                         if not chunk:
@@ -233,10 +197,10 @@ class HyperTGDownload:
                         await sleep(e.value + 1)
                         continue
                     if isinstance(e, (AsyncTimeoutError, ConnectionError, RuntimeError)):
-                        session_key = (index, file_id.dc_id)
+                        session_key = file_id.dc_id
                         async with self._session_lock:
                             self.session_pool.pop(session_key, None)
-                        self.cache_file_ref.pop(index, None)
+                        self.cache_file_ref.pop(0, None)
                         try:
                             await media_session.stop()
                         except:
@@ -245,14 +209,12 @@ class HyperTGDownload:
             if current_part <= part_count:
                 raise ValueError(f"Incomplete download: got {current_part-1} of {part_count} parts")
         except (AsyncTimeoutError, ConnectionError, AttributeError, RuntimeError) as e:
-            if 'file_id' in locals():
-                session_key = (index, file_id.dc_id)
+            if "file_id" in locals():
+                session_key = file_id.dc_id
                 async with self._session_lock:
                     self.session_pool.pop(session_key, None)
-                self.cache_file_ref.pop(index, None)
+                self.cache_file_ref.pop(0, None)
             raise
-        finally:
-            pass
 
     async def progress_callback(self, progress, progress_args):
         if not progress:
@@ -271,7 +233,7 @@ class HyperTGDownload:
         until_bytes, from_bytes = min(end, self.file_size - 1), start
         offset = from_bytes - (from_bytes % self.chunk_size)
         first_part_cut = from_bytes - offset
-        last_part_cut = until_bytes % self.chunk_size + 1
+        last_part_cut = (until_bytes % self.chunk_size) + 1
         part_count = math.ceil(until_bytes / self.chunk_size) - math.floor(offset / self.chunk_size)
         part_file_path = os.path.join(self.directory, f"{self.file_name}.temp.{part_index:02d}")
         part_bytes = 0
@@ -309,24 +271,20 @@ class HyperTGDownload:
             results = await gather(*tasks)
             async with aiopen(temp_file_path, "wb") as temp_file:
                 for _, part_file_path in sorted(results, key=lambda x: x[0]):
-                    try:
-                        async with aiopen(part_file_path, "rb") as part_file:
-                            while True:
-                                chunk = await part_file.read(8 * 1024 * 1024)
-                                if not chunk:
-                                    break
-                                await temp_file.write(chunk)
-                        await remove(part_file_path)
-                    except Exception as e:
-                        print(f"Error processing part file {part_file_path}: {e}")
-                        raise
+                    async with aiopen(part_file_path, "rb") as part_file:
+                        while True:
+                            chunk = await part_file.read(8 * 1024 * 1024)
+                            if not chunk:
+                                break
+                            await temp_file.write(chunk)
+                    await remove(part_file_path)
             if prog_task and not prog_task.done():
                 prog_task.cancel()
             file_path = os.path.splitext(temp_file_path)[0]
             await asyncio.to_thread(shutil.move, temp_file_path, file_path)
             return file_path
-        except FloodWait as fw:
-            raise fw
+        except FloodWait:
+            raise
         except (CancelledError, StopTransmission):
             return None
         except Exception as e:
@@ -402,7 +360,7 @@ class HyperTGDownload:
                 self.directory = Path(os.getcwd()).parent / (self.directory or self.download_dir)
             if not self.file_name:
                 extension = await self.get_extension(file_type, mime_type)
-                self.file_name = f"{FileType(file_id_obj.file_type).name.lower()}_{(date or asyncio.get_event_loop().time())}_{MsgId()}{extension}"
+                self.file_name = f"{FileType(file_id_obj.file_type).name.lower()}_{(date or time.time())}_{MsgId()}{extension}"
             return await self.handle_download(progress, progress_args)
         except Exception as e:
             print(f"Download media error: {e}")
@@ -410,7 +368,12 @@ class HyperTGDownload:
 
 
 class HyperTGUpload:
-    """Parallel file uploader for Telegram using multiple sessions on the same DC."""
+    """
+    Parallel Telegram uploader — file ko multiple parts me upload karta hai
+    alag-alag sessions se same DC par. 50MB+ files ke liye parallel hota hai.
+    WZML-XDZ se adapted for single-client bot.
+    """
+
     _global_semaphore = Semaphore(16)
 
     def __init__(self, num_workers=6):

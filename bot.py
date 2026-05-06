@@ -10,7 +10,9 @@ except RuntimeError:
 import os
 import json
 from pyrogram import Client, filters
+from pyrogram import raw
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
+from hypertg import HyperTGDownload, HyperTGUpload
 
 # 👇 Environment variables from Heroku config
 API_ID = int(os.environ.get("API_ID", 14050586))
@@ -218,10 +220,15 @@ async def video_worker(client):
         
         try:
             status = await message.reply_text("⏳ Download Starting...", reply_markup=get_cancel_button(user_id))
-            input_file = await message.download(
+            hyper_dl = HyperTGDownload(app, num_parts=8)
+            input_file = await hyper_dl.download_media(
+                message,
+                file_name=f"downloads/{user_id}/",
                 progress=progress_bar,
                 progress_args=("📥 Downloading Video", status, time.time(), {"last_edit": 0}, user_id)
             )
+            if input_file is None:
+                return
             
             _, _, total_duration = await get_video_metadata(input_file)
             mode = settings["mode"]
@@ -236,10 +243,10 @@ async def video_worker(client):
                     original_caption = message.caption or os.path.basename(output)
                     w, h, duration = await get_video_metadata(output)
                     
-                    await message.reply_video(
-                        video=output,
+                    await hyper_upload(
+                        client, message.chat.id, output,
                         caption=f"**{res}** | PREMIUM Encode ✅\n📁 {original_caption}",
-                        supports_streaming=True, width=w, height=h, duration=duration,
+                        w=w, h=h, duration=duration,
                         progress=progress_bar,
                         progress_args=(f"📤 Uploading {res}", status, time.time(), {"last_edit": 0}, user_id)
                     )
@@ -259,6 +266,40 @@ async def video_worker(client):
     
     global worker_running
     worker_running = False
+
+
+async def hyper_upload(client, chat_id, file_path, caption, w, h, duration, progress, progress_args):
+    hyper_ul = HyperTGUpload(num_workers=6)
+    input_file = await hyper_ul.save_file(client, file_path, progress=progress, progress_args=progress_args)
+    if input_file is None:
+        return None
+    is_big = isinstance(input_file, raw.types.InputFileBig)
+    if is_big:
+        media = raw.types.InputMediaUploadedDocument(
+            file=input_file, mime_type="video/mp4", attributes=[
+                raw.types.DocumentAttributeVideo(
+                    supports_streaming=True, w=w or 0, h=h or 0, duration=duration or 0
+                ),
+                raw.types.DocumentAttributeFilename(file_name=os.path.basename(file_path)),
+            ],
+        )
+    else:
+        media = raw.types.InputMediaUploadedDocument(
+            file=input_file, mime_type="video/mp4", attributes=[
+                raw.types.DocumentAttributeVideo(
+                    supports_streaming=True, w=w or 0, h=h or 0, duration=duration or 0
+                ),
+                raw.types.DocumentAttributeFilename(file_name=os.path.basename(file_path)),
+            ],
+            md5_checksum=input_file.md5_checksum,
+        )
+    peer = await client.resolve_peer(chat_id)
+    await client.invoke(
+        raw.functions.messages.SendMedia(
+            peer=peer, media=media, message=caption, random_id=client.rnd_id()
+        )
+    )
+    return True
 
 # --- FFMPEG ENGINE (LOW RAM + LIVE PROGRESS) ---
 async def encode_video(input_file, res_key, status: Message, settings, user_id, total_duration):

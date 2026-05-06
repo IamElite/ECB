@@ -1,1 +1,1 @@
-worker: bash SyntaxRealm.sh
+worker: sh SyntaxRealm.sh

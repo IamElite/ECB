@@ -61,3 +61,6 @@ def update_from_repo():
 
     print("[UPDATE] Update applied successfully!")
     return True
+
+if __name__ == "__main__":
+    update_from_repo()

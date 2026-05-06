@@ -361,6 +361,11 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
         raise Exception(f"FFmpeg failed! Error terminal me dekhein.")
     return output_file
 
+@app.on_message(filters.command(["restart"]) & filters.user(ADMIN_ID))
+async def restart_cmd(client, message: Message):
+    await message.reply_text("🔄 Restarting bot... Code will auto-update from GitHub.")
+    os.execl(sys.executable, sys.executable, "bot.py")
+
 @app.on_message(filters.command("start"))
 async def start_cmd(client, message: Message):
     await set_bot_menu()

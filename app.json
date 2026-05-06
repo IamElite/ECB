@@ -1,0 +1,20 @@
+{
+  "name": "Pro Encode Bot",
+  "description": "Telegram Video Encode Bot powered by FFmpeg",
+  "repository": "",
+  "keywords": ["python", "telegram", "pyrogram", "ffmpeg"],
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    },
+    {
+      "url": "https://github.com:jonathanong/heroku-buildpack-ffmpeg-latest.git"
+    }
+  ],
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "standard-2x"
+    }
+  }
+}

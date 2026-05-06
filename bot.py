@@ -190,6 +190,8 @@ async def premium_settings_guard(client, message: Message):
 # --- CORE LOGIC (VIDEO RECEPTION & QUEUE) ---
 @app.on_message(filters.video | filters.document)
 async def add_to_queue(client, message: Message):
+    if not message.from_user:
+        return
     if not is_premium(message.from_user.id):
         return await message.reply_text("⛔ **Premium Required:** Video encode karne ke liye Premium Access hona chahiye. Admin se sampark karein.")
 

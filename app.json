@@ -1,7 +1,6 @@
 {
   "name": "Pro Encode Bot",
   "description": "Telegram Video Encode Bot powered by FFmpeg",
-  "repository": "",
   "keywords": ["python", "telegram", "pyrogram", "ffmpeg"],
   "buildpacks": [
     {

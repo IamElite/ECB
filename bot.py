@@ -14,7 +14,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 
 # 👇 Environment variables from Heroku config
 API_ID = int(os.environ.get("API_ID", 14050586))
-API_HASH = os.environ.get("API_HASH", "42a60d9c657b106370c79bb0a8ac560ch")
+API_HASH = os.environ.get("API_HASH", "42a60d9c657b106370c79bb0a8ac560c")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8266949820:AAH5AZ58is4bI06UXmytuaSLIP0mKEnXMa8")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", 7074383232))
 

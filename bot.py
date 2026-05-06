@@ -34,6 +34,8 @@ waiting_for = {}
 async def set_bot_menu():
     await app.set_bot_commands([
         BotCommand("start", "Bot start karein"),
+        BotCommand("encode", "Video encode karein 🎬"),
+        BotCommand("ec", "Video encode karein (shortcut)"),
         BotCommand("my_status", "Premium status check karein"),
         BotCommand("settings", "Settings (Premium Only)"),
         BotCommand("set_mode", "Set Mode (Premium Only)"),
@@ -187,8 +189,8 @@ async def premium_settings_guard(client, message: Message):
         else:
             await message.reply_text("❌ Sahi Format: `/set_audio 480p 64k`")
 
-# --- CORE LOGIC (VIDEO RECEPTION & QUEUE) ---
-@app.on_message(filters.video | filters.document)
+# --- CORE LOGIC (/encode or /ec COMMAND) ---
+@app.on_message(filters.command(["encode", "ec"]) & (filters.video | filters.document))
 async def add_to_queue(client, message: Message):
     if not message.from_user:
         return
@@ -197,7 +199,7 @@ async def add_to_queue(client, message: Message):
 
     if message.document:
         if not message.document.file_name.endswith(".srt"):
-            return await message.reply_text("Kripya video ya .srt file bhejein.")
+            return await message.reply_text("Kripya `/encode` ya `/ec` ke saath video ya .srt file bhejein.")
         else:
             s = get_settings(message.from_user.id)
             if s["srt"] and os.path.exists(s["srt"]): os.remove(s["srt"])
@@ -362,7 +364,7 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
 @app.on_message(filters.command("start"))
 async def start_cmd(client, message: Message):
     await set_bot_menu()
-    await message.reply_text("👋 Welcome to Pro Encode Bot!\nType /my_status to check your access.")
+    await message.reply_text("👋 Welcome to Pro Encode Bot!\n\nVideo bhejein saath me `/encode` ya `/ec` command use karein.")
 
 if __name__ == "__main__":
     print("Bot is starting...")

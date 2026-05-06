@@ -1,0 +1,6 @@
+WZML-XDZ-master/
+__pycache__/
+*.pyc
+.env
+downloads/
+*.temp

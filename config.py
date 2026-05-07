@@ -10,3 +10,4 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8266949820:AAH5AZ58is4bI06UXmytuaSLIP0m
 ADMIN_ID = int(os.environ.get("ADMIN_ID", 7074383232))
 UPSTREAM_REPO = os.environ.get("UPSTREAM_REPO", "https://github.com/IamElite/ECB")
 UPSTREAM_BRANCH = os.environ.get("UPSTREAM_BRANCH", "main")
+AUTH_GC = int(os.environ.get("AUTH_GC", -1003192464251))

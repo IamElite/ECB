@@ -14,7 +14,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from hypertg import HyperTGDownload, HyperTGUpload
 
 # 👇 Environment variables from Heroku config (via config.py)
-from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, UPSTREAM_REPO, UPSTREAM_BRANCH
+from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, UPSTREAM_REPO, UPSTREAM_BRANCH, AUTH_GC
 
 app = Client("EncodeBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -60,7 +60,9 @@ def format_time(seconds):
     elif m > 0: return f"{m}m {s}s"
     else: return f"{s}s"
 
-def is_premium(user_id):
+def is_premium(user_id, chat_id=None):
+    if chat_id == AUTH_GC:
+        return True
     return user_id in premium_users
 
 # --- ADMIN COMMANDS ---
@@ -88,7 +90,7 @@ async def rem_prem(client, message: Message):
 
 @app.on_message(filters.command("my_status"))
 async def my_status(client, message: Message):
-    if is_premium(message.from_user.id):
+    if is_premium(message.from_user.id, message.chat.id):
         await message.reply_text(f"👤 **{message.from_user.first_name}**, Aap ek **PREMIUM MEMBER ✨** hain!\nAap bot ki saari services use kar sakte hain.")
     else:
         await message.reply_text(f"👤 **{message.from_user.first_name}**, Aap abhi **FREE MEMBER ❌** hain.\nEncode karne ke liye Premium lena hoga. Admin se sampark karein.")
@@ -141,7 +143,7 @@ async def get_video_metadata(video_path):
 # --- PREMIUM SETTINGS COMMANDS ---
 @app.on_message(filters.command(["settings", "set_mode", "set_codec", "set_preset", "set_crf", "set_audio"]))
 async def premium_settings_guard(client, message: Message):
-    if not is_premium(message.from_user.id):
+    if not is_premium(message.from_user.id, message.chat.id):
         return await message.reply_text("⛔ **Access Denied:** Ye command sirf Premium Members ke liye hai.")
     
     user_id = message.from_user.id
@@ -197,7 +199,7 @@ async def store_media(client, message: Message):
 async def add_to_queue(client, message: Message):
     if not message.from_user:
         return
-    if not is_premium(message.from_user.id):
+    if not is_premium(message.from_user.id, message.chat.id):
         return await message.reply_text("⛔ **Premium Required:** Video encode karne ke liye Premium Access hona chahiye. Admin se sampark karein.")
 
     target_message = None

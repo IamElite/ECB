@@ -4,6 +4,10 @@ import math
 import re
 import os
 import json
+
+# Python 3.14 compatibility — Pyrogram 2.0.106 needs an event loop at import time
+asyncio.set_event_loop(asyncio.new_event_loop())
+
 from pyrogram import Client, filters
 from pyrogram import raw
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, BotCommand

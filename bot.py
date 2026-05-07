@@ -419,14 +419,6 @@ async def start_cmd(client, message: Message):
     await set_bot_menu()
     await message.reply_text("👋 Welcome to Pro Encode Bot!\n\nVideo bhejein saath me `/encode` ya `/ec` command use karein.")
 
-async def main():
-    await app.start()
-    me = await app.get_me()
-    await set_bot_menu()
-    print(f"Bot started successfully! Username: @{me.username}")
-    stop_event = asyncio.Event()
-    await stop_event.wait()
-
 if __name__ == "__main__":
     print("Bot is starting...")
-    asyncio.run(main())
+    app.run()

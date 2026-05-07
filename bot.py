@@ -419,12 +419,12 @@ async def start_cmd(client, message: Message):
 
 async def main():
     await app.start()
+    me = await app.get_me()
     await set_bot_menu()
-    print("Bot started successfully!")
-    # Use a simple event to keep the bot running
+    print(f"Bot started successfully! Username: @{me.username}")
     stop_event = asyncio.Event()
     await stop_event.wait()
 
 if __name__ == "__main__":
-    print("Bot is starting... Username: EncodingiBot")
+    print("Bot is starting...")
     asyncio.run(main())

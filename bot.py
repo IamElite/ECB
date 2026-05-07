@@ -426,5 +426,5 @@ async def main():
     await stop_event.wait()
 
 if __name__ == "__main__":
-    print(f"Bot is starting... Token: {BOT_TOKEN[:10]}****")
+    print("Bot is starting... Username: EncodingiBot")
     asyncio.run(main())

@@ -267,10 +267,18 @@ async def video_worker(client):
                 if cancel_flags.get(user_id): break
                 try:
                     output = await encode_video(input_file, res, status, settings, user_id, total_duration)
-                    await status.edit_text(f"⏳ Extracting Metadata...", reply_markup=get_cancel_button(user_id))
+                    if not output or not os.path.exists(output) or os.path.getsize(output) < 1024:
+                        await message.reply_text(f"❌ {res} encoding failed — output file invalid or empty.")
+                        continue
+                    await status.edit_text(f"⏳ Verifying {res}...", reply_markup=get_cancel_button(user_id))
+                    
+                    w, h, duration = await get_video_metadata(output)
+                    if duration == 0:
+                        await message.reply_text(f"❌ {res} metadata read failed — skipping upload.")
+                        os.remove(output)
+                        continue
                     
                     original_caption = message.caption or os.path.basename(output)
-                    w, h, duration = await get_video_metadata(output)
                     
                     await hyper_upload(
                         client, message.chat.id, output,
@@ -332,13 +340,16 @@ async def hyper_upload(client, chat_id, file_path, caption, w, h, duration, prog
 
 # --- FFMPEG ENGINE (LOW RAM + LIVE PROGRESS) ---
 async def encode_video(input_file, res_key, status: Message, settings, user_id, total_duration):
-    base_name = os.path.splitext(os.path.basename(input_file))[0]
-    output_file = f"{base_name}_{res_key}_{user_id}.mp4" 
+    raw_name = os.path.splitext(os.path.basename(input_file))[0]
+    import re as _re
+    clean_name = _re.sub(r'_(480p|720p|1080p|2160p|240p)$', '', raw_name, flags=_re.IGNORECASE)
+    clean_name = _re.sub(r'^(480p|720p|1080p|2160p|240p)_', '', clean_name, flags=_re.IGNORECASE)
+    clean_name = _re.sub(r'_(480p|720p|1080p|2160p|240p)_', '_', clean_name, flags=_re.IGNORECASE)
+    output_file = f"{clean_name}_{res_key}_{user_id}.mp4" 
     
     scales = {"480p": "scale=-2:480", "720p": "scale=-2:720", "1080p": "scale=-2:1080"}
     scale = scales[res_key]
     
-    # ✅ FIXED: Syntax Error hatane ke liye isko alag alag lines me kar diya hai
     sub_file = settings["srt"]
     if sub_file and os.path.exists(sub_file):
         sub_file_fixed = sub_file.replace('\\', '/')
@@ -346,7 +357,7 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
     else:
         sub_cmd = f'-vf "{scale}"'
 
-    cmd = f'ffmpeg -y -i "{input_file}" {sub_cmd} -map 0:v -map 0:a -map_metadata 0 -map_chapters 0 -c:v {settings["codec"]} -preset {settings["preset"]} -crf {settings["crf"][res_key]} -threads 2 -max_muxing_queue_size 1024 -pix_fmt yuv420p -c:a aac -b:a {settings["audio"][res_key]} "{output_file}"'
+    cmd = f'ffmpeg -y -i "{input_file}" {sub_cmd} -map 0:v -map 0:a -map_metadata 0 -map_chapters 0 -movflags +faststart -c:v {settings["codec"]} -preset {settings["preset"]} -crf {settings["crf"][res_key]} -threads 2 -max_muxing_queue_size 1024 -pix_fmt yuv420p -c:a aac -b:a {settings["audio"][res_key]} "{output_file}"'
 
     proc = await asyncio.create_subprocess_shell(cmd, stderr=asyncio.subprocess.PIPE)
     time_regex = re.compile(r"time=(\d{2}):(\d{2}):(\d{2})\.\d{2}")

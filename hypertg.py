@@ -357,7 +357,7 @@ class HyperTGDownload:
             self.directory, self.file_name = os.path.split(file_name)
             self.file_name = self.file_name or media_file_name or ""
             if not os.path.isabs(self.file_name):
-                self.directory = Path(os.getcwd()).parent / (self.directory or self.download_dir)
+                self.directory = os.path.join(os.getcwd(), self.directory or self.download_dir)
             if not self.file_name:
                 extension = await self.get_extension(file_type, mime_type)
                 self.file_name = f"{FileType(file_id_obj.file_type).name.lower()}_{(date or time.time())}_{MsgId()}{extension}"

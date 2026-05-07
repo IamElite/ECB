@@ -346,7 +346,7 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
     else:
         sub_cmd = f'-vf "{scale}"'
 
-    cmd = f'ffmpeg -y -i "{input_file}" {sub_cmd} -c:v {settings["codec"]} -preset {settings["preset"]} -crf {settings["crf"][res_key]} -threads 2 -max_muxing_queue_size 1024 -pix_fmt yuv420p -c:a aac -b:a {settings["audio"][res_key]} -map_metadata 0 -map_chapters 0 "{output_file}"'
+    cmd = f'ffmpeg -y -i "{input_file}" {sub_cmd} -map 0:v -map 0:a -map_metadata 0 -map_chapters 0 -c:v {settings["codec"]} -preset {settings["preset"]} -crf {settings["crf"][res_key]} -threads 2 -max_muxing_queue_size 1024 -pix_fmt yuv420p -c:a aac -b:a {settings["audio"][res_key]} "{output_file}"'
 
     proc = await asyncio.create_subprocess_shell(cmd, stderr=asyncio.subprocess.PIPE)
     time_regex = re.compile(r"time=(\d{2}):(\d{2}):(\d{2})\.\d{2}")

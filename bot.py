@@ -419,10 +419,7 @@ async def start_cmd(client, message: Message):
 
 if __name__ == "__main__":
     print(f"Bot is starting... Token: {BOT_TOKEN[:10]}****")
-    try:
-        asyncio.run(app.start())
-        print("Bot started successfully!")
-        asyncio.get_event_loop().run_forever()
-    except Exception as e:
-        print(f"Bot failed to start: {e}")
-        raise
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(app.start())
+    print("Bot started successfully!")
+    loop.run_forever()

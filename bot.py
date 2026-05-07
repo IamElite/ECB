@@ -30,6 +30,7 @@ video_queue = asyncio.Queue()
 worker_running = False
 cancel_flags = {}
 waiting_for = {}
+last_media = {}  # per user last media message store karega
 
 async def set_bot_menu():
     await app.set_bot_commands([
@@ -189,24 +190,48 @@ async def premium_settings_guard(client, message: Message):
         else:
             await message.reply_text("❌ Sahi Format: `/set_audio 480p 64k`")
 
+# --- VIDEO/DOC RECEIVER (sirf last media store karega, process nahi karega) ---
+@app.on_message((filters.video | filters.document) & ~filters.command(["encode", "ec"]))
+async def store_media(client, message: Message):
+    if not message.from_user:
+        return
+    user_id = message.from_user.id
+    last_media[user_id] = message
+
 # --- CORE LOGIC (/encode or /ec COMMAND) ---
-@app.on_message(filters.command(["encode", "ec"]) & (filters.video | filters.document))
+@app.on_message(filters.command(["encode", "ec"]))
 async def add_to_queue(client, message: Message):
     if not message.from_user:
         return
     if not is_premium(message.from_user.id):
         return await message.reply_text("⛔ **Premium Required:** Video encode karne ke liye Premium Access hona chahiye. Admin se sampark karein.")
 
-    if message.document:
-        if not message.document.file_name.endswith(".srt"):
-            return await message.reply_text("Kripya `/encode` ya `/ec` ke saath video ya .srt file bhejein.")
-        else:
-            s = get_settings(message.from_user.id)
-            if s["srt"] and os.path.exists(s["srt"]): os.remove(s["srt"])
-            s["srt"] = await message.download(file_name=f"sub_{message.from_user.id}.srt")
-            return await message.reply_text("✅ Subtitle Saved!")
+    target_message = None
 
-    await video_queue.put(message)
+    # Agar kisi message ko reply kiya gaya hai, to us message ko check karo
+    if message.reply_to_message:
+        rmsg = message.reply_to_message
+        if rmsg.video or (rmsg.document and rmsg.document.file_name):
+            target_message = rmsg
+    # Agar reply nahi hai, to user ke last sent media ko check karo
+    elif message.from_user.id in last_media:
+        target_message = last_media[message.from_user.id]
+
+    if not target_message:
+        return await message.reply_text("❌ Pehle video bhejein, fir `/encode` ya `/ec` command dein (ya video ko reply karke command use karein).")
+
+    # Subtitle file hai to save karo
+    if target_message.document and target_message.document.file_name and target_message.document.file_name.endswith(".srt"):
+        s = get_settings(message.from_user.id)
+        if s["srt"] and os.path.exists(s["srt"]): os.remove(s["srt"])
+        s["srt"] = await target_message.download(file_name=f"sub_{message.from_user.id}.srt")
+        return await message.reply_text("✅ Subtitle Saved!")
+
+    # Video document hai (bina .srt extension ke) to error do
+    if target_message.document and not target_message.document.file_name.endswith(".srt"):
+        return await message.reply_text("❌ Sirf video files ya .srt subtitle files hi encode ki ja sakti hain.")
+
+    await video_queue.put(target_message)
     await message.reply_text(f"📥 Video Queued. Wait for your turn...", reply_markup=get_cancel_button(message.from_user.id))
 
     global worker_running

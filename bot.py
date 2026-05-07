@@ -2,11 +2,6 @@ import asyncio
 import time
 import math
 import re
-try:
-    asyncio.get_event_loop()
-except RuntimeError:
-    asyncio.set_event_loop(asyncio.new_event_loop())
-
 import os
 import json
 from pyrogram import Client, filters
@@ -419,5 +414,11 @@ async def start_cmd(client, message: Message):
     await message.reply_text("👋 Welcome to Pro Encode Bot!\n\nVideo bhejein saath me `/encode` ya `/ec` command use karein.")
 
 if __name__ == "__main__":
-    print("Bot is starting...")
-    app.run()
+    print(f"Bot is starting... Token: {BOT_TOKEN[:10]}****")
+    try:
+        asyncio.run(app.start())
+        print("Bot started successfully!")
+        asyncio.get_event_loop().run_forever()
+    except Exception as e:
+        print(f"Bot failed to start: {e}")
+        raise

@@ -3,6 +3,7 @@ import time
 import math
 import re
 import os
+import sys
 import json
 
 # Python 3.14 compatibility — Pyrogram 2.0.106 needs an event loop at import time
@@ -141,6 +142,57 @@ async def get_video_metadata(video_path):
     except: return 0, 0, 0
 
 # --- PREMIUM SETTINGS COMMANDS ---
+def settings_keyboard(user_id):
+    s = get_settings(user_id)
+    codec_display = s["codec"].replace("lib", "")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🎬 Mode: {s['mode'].upper()}", callback_data="settings_mode"),
+         InlineKeyboardButton(f"💾 Codec: {codec_display}", callback_data="settings_codec"),
+         InlineKeyboardButton(f"⚡ Preset: {s['preset'].upper()}", callback_data="settings_preset")],
+        [InlineKeyboardButton(f"📺 480p CRF: {s['crf']['480p']}", callback_data="settings_crf_480p"),
+         InlineKeyboardButton(f"📺 720p CRF: {s['crf']['720p']}", callback_data="settings_crf_720p"),
+         InlineKeyboardButton(f"📺 1080p CRF: {s['crf']['1080p']}", callback_data="settings_crf_1080p")],
+        [InlineKeyboardButton(f"🔊 480p: {s['audio']['480p']}", callback_data="settings_audio_480p"),
+         InlineKeyboardButton(f"🔊 720p: {s['audio']['720p']}", callback_data="settings_audio_720p"),
+         InlineKeyboardButton(f"🔊 1080p: {s['audio']['1080p']}", callback_data="settings_audio_1080p")],
+        [InlineKeyboardButton("❌ Close", callback_data="settings_close")]
+    ])
+
+def settings_text(user_id):
+    s = get_settings(user_id)
+    codec_display = s["codec"].replace("lib", "")
+    return (f"⚙️ **Your Premium Settings**\n\n"
+            f"🎬 **Mode:** `{s['mode'].upper()}`\n"
+            f"💾 **Codec:** `{codec_display}` | ⚡ **Preset:** `{s['preset'].upper()}`\n\n"
+            f"📺 `480p` → CRF `{s['crf']['480p']}` | Audio `{s['audio']['480p']}`\n"
+            f"📺 `720p` → CRF `{s['crf']['720p']}` | Audio `{s['audio']['720p']}`\n"
+            f"📺 `1080p` → CRF `{s['crf']['1080p']}` | Audio `{s['audio']['1080p']}`")
+
+def setting_value_buttons(setting_key, options, user_id, back_action="settings_main"):
+    buttons = []
+    current = get_setting_value(setting_key, user_id)
+    for opt in options:
+        label = opt
+        if str(opt).lower() == str(current).lower():
+            label = f"✅ {opt}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"set_{setting_key}_{opt}")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data=back_action)])
+    return InlineKeyboardMarkup(buttons)
+
+def get_setting_value(key, user_id):
+    s = get_settings(user_id)
+    parts = key.split("_")
+    if parts[0] == "mode":
+        return s["mode"]
+    elif parts[0] == "codec":
+        return s["codec"].replace("lib", "")
+    elif parts[0] == "preset":
+        return s["preset"]
+    elif parts[0] == "crf" and len(parts) >= 2:
+        return s["crf"][parts[1]]
+    elif parts[0] == "audio" and len(parts) >= 2:
+        return s["audio"][parts[1]]
+
 @app.on_message(filters.command(["settings", "set_mode", "set_codec", "set_preset", "set_crf", "set_audio"]))
 async def premium_settings_guard(client, message: Message):
     if not is_premium(message.from_user.id, message.chat.id):
@@ -152,10 +204,7 @@ async def premium_settings_guard(client, message: Message):
     settings = get_settings(user_id)
 
     if cmd == "settings":
-        s = settings
-        text = f"⚙️ **Your Premium Settings:**\n\nMode: {s['mode'].upper()} | Codec: {s['codec']} | Preset: {s['preset']}\n"
-        text += f"480p: CRF {s['crf']['480p']} | Audio {s['audio']['480p']}\n720p: CRF {s['crf']['720p']} | Audio {s['audio']['720p']}\n1080p: CRF {s['crf']['1080p']} | Audio {s['audio']['1080p']}"
-        await message.reply_text(text)
+        await message.reply_text(settings_text(user_id), reply_markup=settings_keyboard(user_id))
     
     elif cmd == "set_mode" and len(args) == 2:
         if args[1].lower() in ["all", "480p", "720p", "1080p"]:
@@ -171,7 +220,6 @@ async def premium_settings_guard(client, message: Message):
         settings["preset"] = args[1].lower()
         await message.reply_text(f"✅ Preset set to: **{args[1].lower()}**")
 
-    # 👇 Yahan se CRF aur Audio ka logic add kar diya gaya hai 👇
     elif cmd == "set_crf":
         if len(args) == 3 and args[1].lower() in ["480p", "720p", "1080p"] and args[2].isdigit():
             settings["crf"][args[1].lower()] = int(args[2])
@@ -185,6 +233,80 @@ async def premium_settings_guard(client, message: Message):
             await message.reply_text(f"✅ {args[1].upper()} Audio set to: **{args[2]}**")
         else:
             await message.reply_text("❌ Sahi Format: `/set_audio 480p 64k`")
+
+@app.on_callback_query(filters.regex(r"^settings_"))
+async def settings_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    if not is_premium(user_id, callback_query.message.chat.id):
+        return await callback_query.answer("⛔ Premium required!", show_alert=True)
+    
+    data = callback_query.data
+    s = get_settings(user_id)
+
+    if data == "settings_main":
+        await callback_query.message.edit_text(settings_text(user_id), reply_markup=settings_keyboard(user_id))
+        await callback_query.answer()
+
+    elif data == "settings_mode":
+        kb = setting_value_buttons("mode", ["all", "480p", "720p", "1080p"], user_id)
+        await callback_query.message.edit_text("🎬 **Select Encoding Mode:**\n\n`all` → teeno resolutions encode karega\n`480p` → sirf 480p encode karega", reply_markup=kb)
+        await callback_query.answer()
+
+    elif data == "settings_codec":
+        kb = setting_value_buttons("codec", ["x264", "x265"], user_id)
+        await callback_query.message.edit_text("💾 **Select Codec:**\n\n`x264` → fast, widely compatible\n`x265` → smaller file, slower encode", reply_markup=kb)
+        await callback_query.answer()
+
+    elif data == "settings_preset":
+        kb = setting_value_buttons("preset", ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"], user_id)
+        await callback_query.message.edit_text("⚡ **Select Preset:**\n\nFaster = bigger file, less CPU\nSlower = smaller file, more CPU", reply_markup=kb)
+        await callback_query.answer()
+
+    elif data.startswith("settings_crf_"):
+        res = data.replace("settings_crf_", "")
+        crf_range = list(range(18, 30))
+        kb = setting_value_buttons(f"crf_{res}", crf_range, user_id)
+        await callback_query.message.edit_text(f"📺 **Select CRF for {res.upper()}:**\n\nLower = better quality, larger file\nHigher = worse quality, smaller file", reply_markup=kb)
+        await callback_query.answer()
+
+    elif data.startswith("settings_audio_"):
+        res = data.replace("settings_audio_", "")
+        audio_opts = ["32k", "64k", "96k", "128k", "160k", "192k"]
+        kb = setting_value_buttons(f"audio_{res}", audio_opts, user_id)
+        await callback_query.message.edit_text(f"🔊 **Select Audio Bitrate for {res.upper()}:**", reply_markup=kb)
+        await callback_query.answer()
+
+    elif data == "settings_close":
+        await callback_query.message.delete()
+        await callback_query.answer()
+
+@app.on_callback_query(filters.regex(r"^set_"))
+async def set_value_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    if not is_premium(user_id, callback_query.message.chat.id):
+        return await callback_query.answer("⛔ Premium required!", show_alert=True)
+
+    data = callback_query.data
+    s = get_settings(user_id)
+
+    if data.startswith("set_mode_"):
+        s["mode"] = data.replace("set_mode_", "")
+    elif data.startswith("set_codec_"):
+        s["codec"] = f"lib{data.replace('set_codec_', '')}"
+    elif data.startswith("set_preset_"):
+        s["preset"] = data.replace("set_preset_", "")
+    elif data.startswith("set_crf_"):
+        rest = data.replace("set_crf_", "")
+        res, val = rest.split("_", 1)
+        if val.isdigit():
+            s["crf"][res] = int(val)
+    elif data.startswith("set_audio_"):
+        rest = data.replace("set_audio_", "")
+        res, val = rest.split("_", 1)
+        s["audio"][res] = val
+
+    await callback_query.answer("✅ Setting updated!")
+    await callback_query.message.edit_text(settings_text(user_id), reply_markup=settings_keyboard(user_id))
 
 # --- VIDEO/DOC RECEIVER (sirf last media store karega, process nahi karega) ---
 @app.on_message((filters.video | filters.document) & ~filters.command(["encode", "ec"]))

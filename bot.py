@@ -258,8 +258,14 @@ async def video_worker(client):
             )
             if input_file is None:
                 return
+            if not os.path.exists(input_file) or os.path.getsize(input_file) < 1024:
+                return await status.edit_text("❌ Download failed — file empty or corrupted.")
             
-            _, _, total_duration = await get_video_metadata(input_file)
+            orig_w, orig_h, total_duration = await get_video_metadata(input_file)
+            if total_duration == 0:
+                return await status.edit_text("❌ Downloaded file is not a valid video.")
+            input_size = os.path.getsize(input_file) / (1024*1024)
+            print(f"[INFO] Input: {input_file} | Size: {input_size:.1f}MB | Duration: {total_duration}s | {orig_w}x{orig_h}")
             mode = settings["mode"]
             resolutions = ["480p", "720p", "1080p"] if mode == "all" else [mode]
 
@@ -357,7 +363,9 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
     else:
         sub_cmd = f'-vf "{scale}"'
 
-    cmd = f'ffmpeg -y -i "{input_file}" {sub_cmd} -map 0:v -map 0:a -map_metadata 0 -map_chapters 0 -movflags +faststart -c:v {settings["codec"]} -preset {settings["preset"]} -crf {settings["crf"][res_key]} -threads 2 -max_muxing_queue_size 1024 -pix_fmt yuv420p -c:a aac -b:a {settings["audio"][res_key]} "{output_file}"'
+    cmd = f'ffmpeg -y -i "{input_file}" {sub_cmd} -map 0:v -map 0:a -map_metadata 0 -map_chapters 0 -c:v {settings["codec"]} -preset {settings["preset"]} -crf {settings["crf"][res_key]} -threads 2 -max_muxing_queue_size 1024 -pix_fmt yuv420p -c:a aac -b:a {settings["audio"][res_key]} "{output_file}"'
+
+    print(f"[FFMPEG] Starting encode: {output_file}")
 
     proc = await asyncio.create_subprocess_shell(cmd, stderr=asyncio.subprocess.PIPE)
     time_regex = re.compile(r"time=(\d{2}):(\d{2}):(\d{2})\.\d{2}")
@@ -391,10 +399,18 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
                 except: pass
 
     await proc.wait()
-    if proc.returncode != 0 and not cancel_flags.get(user_id):
+    
+    if proc.returncode != 0:
         print(f"\n--- FFMPEG CRASH LOG FOR {res_key} ---")
-        print(error_log) 
-        raise Exception(f"FFmpeg failed! Error terminal me dekhein.")
+        print(error_log)
+        if os.path.exists(output_file): os.remove(output_file)
+        raise Exception(f"FFmpeg failed (exit code {proc.returncode})!")
+    
+    if not os.path.exists(output_file) or os.path.getsize(output_file) < 1024:
+        raise Exception(f"Output file empty or missing after encode!")
+    
+    out_size = os.path.getsize(output_file) / (1024*1024)
+    print(f"[FFMPEG] {res_key} done — {out_size:.1f}MB")
     return output_file
 
 @app.on_message(filters.command(["restart"]) & filters.user(ADMIN_ID))

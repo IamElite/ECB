@@ -420,7 +420,10 @@ async def start_cmd(client, message: Message):
 async def main():
     await app.start()
     await set_bot_menu()
-    await app.idle()
+    print("Bot started successfully!")
+    # Use a simple event to keep the bot running
+    stop_event = asyncio.Event()
+    await stop_event.wait()
 
 if __name__ == "__main__":
     print(f"Bot is starting... Token: {BOT_TOKEN[:10]}****")

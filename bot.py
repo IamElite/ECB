@@ -537,9 +537,11 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
     clean_name = _re.sub(r'_(360p|480p|720p|1080p|2160p|240p)$', '', raw_name, flags=_re.IGNORECASE)
     clean_name = _re.sub(r'^(360p|480p|720p|1080p|2160p|240p)_', '', clean_name, flags=_re.IGNORECASE)
     clean_name = _re.sub(r'_(360p|480p|720p|1080p|2160p|240p)_', '_', clean_name, flags=_re.IGNORECASE)
-    output_file = f"{clean_name}_{res_key}_{user_id}.mp4" 
+    use_template = settings.get("_template", True)
+    ext = "mkv" if use_template else "mp4"
+    output_file = f"{clean_name}_{res_key}_{user_id}.{ext}" 
     
-    if settings.get("_template", True):
+    if use_template:
         cmd = Config.FFMPEG_CMDS[res_key].format(input=input_file, output=output_file)
     else:
         scales = {"360p": "scale=-2:360", "480p": "scale=-2:480", "720p": "scale=-2:720", "1080p": "scale=-2:1080"}

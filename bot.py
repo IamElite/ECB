@@ -535,7 +535,7 @@ async def video_worker(client):
 
 
 async def hyper_upload(client, chat_id, file_path, caption, w, h, duration, progress, progress_args):
-    hyper_ul = HyperTGUpload(num_workers=6)
+    hyper_ul = HyperTGUpload(num_workers=Config.UPLOAD_WORKERS)
     input_file = await hyper_ul.save_file(client, file_path, progress=progress, progress_args=progress_args)
     if input_file is None:
         return None

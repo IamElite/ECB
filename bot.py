@@ -485,36 +485,59 @@ async def video_worker(client):
             input_size = os.path.getsize(input_file) / (1024*1024)
             print(f"[INFO] Input: {input_file} | Size: {input_size:.1f}MB | Duration: {total_duration}s | {orig_w}x{orig_h}")
             resolutions = user_resolutions
+            total_res = len(resolutions)
+            task_progress[user_id]["phase"] = f"⚙️ Encoding 0/{total_res}"
 
-            for res in resolutions:
-                if cancel_flags.get(user_id): break
+            async def encode_one(res):
                 task_progress[user_id]["phase"] = f"⚙️ Encoding {res}"
                 try:
-                    output = await encode_video(input_file, res, status, settings, user_id, total_duration)
-                    if not output or not os.path.exists(output) or os.path.getsize(output) < 1024:
-                        await message.reply_text(f"❌ {res} encoding failed — output file invalid or empty.")
-                        continue
-                    await status.edit_text(f"⏳ Verifying {res}...", reply_markup=get_cancel_button(user_id))
-                    
-                    w, h, duration = await get_video_metadata(output)
-                    if duration == 0:
-                        await message.reply_text(f"❌ {res} metadata read failed — skipping upload.")
-                        os.remove(output)
-                        continue
-                    
-                    original_caption = message.caption or os.path.basename(output)
-                    
-                    task_progress[user_id]["phase"] = f"⬆️ Uploading {res}"
-                    await hyper_upload(
-                        client, message.chat.id, output,
-                        caption=f"**{res}** | PREMIUM Encode ✅\n📁 {original_caption}",
-                        w=w, h=h, duration=duration,
-                        progress=progress_bar,
-                        progress_args=(f"📤 Uploading {res}", status, time.time(), {"last_edit": 0}, user_id)
-                    )
-                    os.remove(output)
+                    out = await encode_video(input_file, res, None, settings, user_id, total_duration)
+                    return res, out, None
                 except Exception as e:
-                    if "Cancelled" not in str(e): await message.reply_text(f"❌ {res} failed: {e}")
+                    return res, None, e
+
+            enc_tasks = [encode_one(r) for r in resolutions]
+            done_enc = 0
+            encoded_outputs = []
+
+            for coro in asyncio.as_completed(enc_tasks):
+                if cancel_flags.get(user_id): break
+                res, out, err = await coro
+                done_enc += 1
+                task_progress[user_id]["phase"] = f"⚙️ {done_enc}/{total_res}"
+                encoded_outputs.append((res, out, err))
+                try:
+                    await status.edit_text(f"⚙️ **Encoding {done_enc}/{total_res}**\n✅ {done_enc} done, {total_res - done_enc} remaining", reply_markup=get_cancel_button(user_id))
+                except: pass
+
+            try: await status.edit_text("✅ **Encoding Complete!** Uploading...", reply_markup=get_cancel_button(user_id))
+            except: pass
+
+            for res, output, err in encoded_outputs:
+                if cancel_flags.get(user_id): break
+                if err:
+                    if "Cancelled" not in str(err): await message.reply_text(f"❌ {res} failed: {err}")
+                    continue
+                if not output or not os.path.exists(output) or os.path.getsize(output) < 1024:
+                    await message.reply_text(f"❌ {res} encoding failed — output file invalid or empty.")
+                    continue
+
+                w, h, duration = await get_video_metadata(output)
+                if duration == 0:
+                    await message.reply_text(f"❌ {res} metadata read failed — skipping upload.")
+                    os.remove(output)
+                    continue
+
+                original_caption = message.caption or os.path.basename(output)
+                task_progress[user_id]["phase"] = f"⬆️ Uploading {res}"
+                await hyper_upload(
+                    client, message.chat.id, output,
+                    caption=f"**{res}** | PREMIUM Encode ✅\n📁 {original_caption}",
+                    w=w, h=h, duration=duration,
+                    progress=progress_bar,
+                    progress_args=(f"📤 Uploading {res}", status, time.time(), {"last_edit": 0}, user_id)
+                )
+                os.remove(output)
 
             if cancel_flags.get(user_id): await status.edit_text("❌ Process Cancelled by User.")
             else: await status.delete()
@@ -568,7 +591,7 @@ async def hyper_upload(client, chat_id, file_path, caption, w, h, duration, prog
     return True
 
 # --- FFMPEG ENGINE (LOW RAM + LIVE PROGRESS) ---
-async def encode_video(input_file, res_key, status: Message, settings, user_id, total_duration):
+async def encode_video(input_file, res_key, status=None, settings=None, user_id=None, total_duration=0):
     raw_name = os.path.splitext(os.path.basename(input_file))[0]
     import re as _re
     clean_name = _re.sub(r'_(360p|480p|720p|1080p|2160p|240p)$', '', raw_name, flags=_re.IGNORECASE)
@@ -654,8 +677,9 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
                     f"├ **Elapsed:** {format_time(elapsed_sec)}\n"
                     f"╰ **Cancel:** `/cancel`"
                 )
-                try: await status.edit_text(text, reply_markup=get_cancel_button(user_id))
-                except: pass
+                if status:
+                    try: await status.edit_text(text, reply_markup=get_cancel_button(user_id))
+                    except: pass
 
     await proc.wait()
     

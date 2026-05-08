@@ -597,8 +597,11 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
 
     proc = await asyncio.create_subprocess_shell(cmd, stderr=asyncio.subprocess.PIPE)
     time_regex = re.compile(r"time=(\d{2}):(\d{2}):(\d{2})\.\d{2}")
+    speed_regex = re.compile(r"speed=\s*(\d+\.?\d*)x")
+    size_regex = re.compile(r"size=\s*(\d+)\s*kB")
     last_edit = 0
     error_log = ""
+    out_size_mb = 0
 
     while True:
         chunk = await proc.stderr.read(2048)
@@ -618,14 +621,39 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
             h, m, s = map(int, matches[-1]) 
             elapsed_sec = h * 3600 + m * 60 + s
             percentage = min(100, (elapsed_sec / total_duration) * 100)
-            
-            if time.time() - last_edit > 4: 
-                last_edit = time.time()
+
+            sp = speed_regex.search(chunk_str)
+            speed_str = sp.group(1) + "x" if sp else "N/A"
+
+            sz = size_regex.search(chunk_str)
+            if sz:
+                out_size_mb = round(int(sz.group(1)) / 1024, 1)
+
+            now = time.time()
+            if now - last_edit > 4:
+                last_edit = now
                 if user_id in task_progress:
-                    task_progress[user_id]["percent"] = percentage
-                    task_progress[user_id]["elapsed"] = format_time(elapsed_sec)
-                bar = "■" * int(percentage/5) + "□" * (20 - int(percentage/5))
-                text = (f"⚙️ **Encoding {res_key.upper()}**\n\n`[{bar}] {percentage:.1f}%`\n\n**Codec:** {settings['codec'].upper()} | **Preset:** {settings['preset'].upper()}")
+                    p = task_progress[user_id]
+                    p["percent"] = percentage
+                    p["elapsed"] = format_time(elapsed_sec)
+                    p["speed"] = speed_str
+                    p["processed"] = f"{out_size_mb} MB"
+                    remaining = total_duration - elapsed_sec
+                    if sp:
+                        sp_val = float(sp.group(1))
+                        if sp_val > 0:
+                            eta_sec = int(remaining / sp_val)
+                            p["eta"] = format_time(eta_sec)
+                bar = leech_bar(percentage)
+                text = (
+                    f"╭ 🎯 **Encoding** — `{res_key.upper()}`\n"
+                    f"├ `{bar}` **{percentage:.1f}%**\n"
+                    f"├ **Speed:** {speed_str}\n"
+                    f"├ **Size:** {out_size_mb} MB\n"
+                    f"├ **ETA:** {task_progress.get(user_id, {}).get('eta', 'N/A')}\n"
+                    f"├ **Elapsed:** {format_time(elapsed_sec)}\n"
+                    f"╰ **Cancel:** `/cancel`"
+                )
                 try: await status.edit_text(text, reply_markup=get_cancel_button(user_id))
                 except: pass
 

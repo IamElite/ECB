@@ -13,3 +13,4 @@ class Config:
 
     MAX_BOT_TASKS = int(os.environ.get("MAX_BOT_TASKS", 20))
     MAX_USER_TASKS = int(v) if (v := os.environ.get("MAX_USER_TASKS", "")) else None
+    DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "downloads/")

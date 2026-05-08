@@ -28,6 +28,7 @@ waiting_for = {}
 last_media = {}  # per user last media message store karega
 current_processing = {"user_id": None, "start_time": 0}  # currently encoding user
 queue_list = []  # (user_id, timestamp) for /queue tracking
+task_progress = {}  # user_id -> {phase, percent, speed, processed, total, eta, elapsed, filename, gid}
 
 async def set_bot_menu():
     await app.set_bot_commands([
@@ -63,6 +64,11 @@ def format_time(seconds):
     if h > 0: return f"{h}h {m}m {s}s"
     elif m > 0: return f"{m}m {s}s"
     else: return f"{s}s"
+
+def leech_bar(percent):
+    filled = "🟦" * int(percent / 5)
+    empty = "🟧" * (20 - int(percent / 5))
+    return filled + empty
 
 def is_premium(user_id, chat_id=None):
     if chat_id == Config.AUTH_GC:
@@ -128,6 +134,15 @@ async def progress_bar(current, total, action, message, start_time, edit_info, u
         elapsed = now - start_time
         speed = current / elapsed if elapsed > 0 else 0
         eta = (total - current) / speed if speed > 0 else 0
+        if user_id in task_progress:
+            p = task_progress[user_id]
+            p["percent"] = percentage
+            p["speed"] = f"{speed/(1024*1024):.2f} MB/s"
+            p["processed"] = f"{current/(1024*1024):.1f} MB"
+            p["total"] = f"{total/(1024*1024):.1f} MB"
+            p["eta"] = format_time(eta)
+            p["elapsed"] = format_time(elapsed)
+            p["phase"] = action
         bar_length = 15
         completed = int((percentage / 100) * bar_length)
         bar = "■" * completed + "□" * (bar_length - completed)
@@ -390,12 +405,20 @@ async def video_worker(client):
         cancel_flags[user_id] = False
         input_file = None
         
+        filename = getattr(getattr(message, "video", None), "file_name", None) or getattr(getattr(message, "document", None), "file_name", None) or f"video_{user_id}"
+        task_progress[user_id] = {
+            "filename": filename, "phase": "⏳ Queued", "percent": 0,
+            "speed": "0 B/s", "processed": "0 B", "total": "0 B",
+            "eta": "N/A", "elapsed": "0s", "gid": str(int(time.time()))
+        }
+        
         try:
             status = await message.reply_text("⏳ Download Starting...", reply_markup=get_cancel_button(user_id))
+            task_progress[user_id]["phase"] = "⬇️ Downloading"
             hyper_dl = HyperTGDownload(app, num_parts=8)
             input_file = await hyper_dl.download_media(
                 message,
-                file_name=f"downloads/{user_id}/",
+                file_name=os.path.join(Config.DOWNLOAD_DIR, str(user_id), ""),
                 progress=progress_bar,
                 progress_args=("📥 Downloading Video", status, time.time(), {"last_edit": 0}, user_id)
             )
@@ -414,6 +437,7 @@ async def video_worker(client):
 
             for res in resolutions:
                 if cancel_flags.get(user_id): break
+                task_progress[user_id]["phase"] = f"⚙️ Encoding {res}"
                 try:
                     output = await encode_video(input_file, res, status, settings, user_id, total_duration)
                     if not output or not os.path.exists(output) or os.path.getsize(output) < 1024:
@@ -429,6 +453,7 @@ async def video_worker(client):
                     
                     original_caption = message.caption or os.path.basename(output)
                     
+                    task_progress[user_id]["phase"] = f"⬆️ Uploading {res}"
                     await hyper_upload(
                         client, message.chat.id, output,
                         caption=f"**{res}** | PREMIUM Encode ✅\n📁 {original_caption}",
@@ -451,6 +476,7 @@ async def video_worker(client):
             current_processing["user_id"] = None
             current_processing["start_time"] = 0
             queue_list[:] = [(uid, t) for uid, t in queue_list if uid != user_id]
+            if user_id in task_progress: del task_progress[user_id]
             video_queue.task_done()
     
     global worker_running
@@ -539,6 +565,9 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
             
             if time.time() - last_edit > 4: 
                 last_edit = time.time()
+                if user_id in task_progress:
+                    task_progress[user_id]["percent"] = percentage
+                    task_progress[user_id]["elapsed"] = format_time(elapsed_sec)
                 bar = "■" * int(percentage/5) + "□" * (20 - int(percentage/5))
                 text = (f"⚙️ **Encoding {res_key.upper()}**\n\n`[{bar}] {percentage:.1f}%`\n\n**Codec:** {settings['codec'].upper()} | **Preset:** {settings['preset'].upper()}")
                 try: await status.edit_text(text, reply_markup=get_cancel_button(user_id))
@@ -562,28 +591,44 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
 @app.on_message(filters.command("queue"))
 async def queue_status(client, message: Message):
     user_id = message.from_user.id
-    total = len(queue_list)
-    limit_display = f"**{total}**/**{Config.MAX_BOT_TASKS}**"
-    text = f"📋 **Queue Status**\n\nTotal: {limit_display} videos in queue"
-    if current_processing["user_id"] == user_id:
-        elapsed = time.time() - current_processing["start_time"]
-        text += f"\n\n⚙️ Aapki video abhi **encode ho rahi hai** ({format_time(int(elapsed))} se)"
-        remaining = [uid for uid, _ in queue_list if uid != user_id]
-        if remaining:
-            text += f"\nAapke baad **{len(remaining)}** aur video(s) hain."
-    else:
-        pos = next((i+1 for i, (uid, _) in enumerate(queue_list) if uid == user_id), None)
-        if pos is not None:
-            text += f"\n\nAapki position: **#{pos}**"
-            if current_processing["user_id"] is not None:
-                elapsed = time.time() - current_processing["start_time"]
-                text += f"\nCurrent encode: **{format_time(int(elapsed))}** se chal raha hai"
-            before = sum(1 for u, _ in queue_list[:pos-1])
-            if before > 0:
-                text += f"\nAapke aage **{before}** aur video(s) hain."
-        else:
-            text += "\n\nAapki koi bhi video abhi queue mein nahi hai."
-    await message.reply_text(text)
+    lines = [f"📊 **Status**\n"]
+    task_count = 0
+
+    if current_processing["user_id"] == user_id and user_id in task_progress:
+        p = task_progress[user_id]
+        bar = leech_bar(p["percent"])
+        lines.append(f"╭ 🎯 **Task** — `{p['filename']}`")
+        lines.append(f"├ **Status:** {p['phase']}")
+        lines.append(f"├ `{bar}` **{p['percent']:.1f}%**")
+        lines.append(f"├ **Speed:** {p['speed']}")
+        lines.append(f"├ **Size:** {p['processed']} / {p['total']}")
+        lines.append(f"├ **ETA:** {p['eta']}")
+        lines.append(f"├ **Elapsed:** {p['elapsed']}")
+        lines.append(f"╰ **Cancel:** `/cancel`\n")
+        task_count += 1
+    elif current_processing["user_id"] == user_id:
+        elapsed = format_time(int(time.time() - current_processing["start_time"]))
+        lines.append(f"╭ 🎯 **Task** — Processing...")
+        lines.append(f"├ **Status:** ⚙️ Encoding")
+        lines.append(f"├ **Elapsed:** {elapsed}")
+        lines.append(f"╰ **Cancel:** `/cancel`\n")
+        task_count += 1
+
+    queued_tasks = [(uid, t) for uid, t in queue_list if uid == user_id]
+    if queued_tasks:
+        lines.append(f"📦 **Queued — {len(queued_tasks)} video(s)**")
+        for i, (uid, t) in enumerate(queued_tasks, 1):
+            lines.append(f"├ **{i}.** `video_{uid}_{int(t)}`")
+        lines.append("╰ Use `/cancel` to remove.\n")
+
+    total_all = len(queue_list) + (1 if current_processing["user_id"] else 0)
+    lines.append(f"━━━━━━━━━━━━")
+    lines.append(f"📊 **Total:** {total_all}/{Config.MAX_BOT_TASKS}")
+
+    if task_count == 0 and not queued_tasks:
+        lines = [f"📊 **Status**\n\nAapki koi bhi video abhi queue mein nahi hai.\nVideo bhejkar `/encode` likhein."]
+
+    await message.reply_text("\n".join(lines))
 
 @app.on_message(filters.command(["restart"]) & filters.user(Config.ADMIN_ID))
 async def restart_cmd(client, message: Message):

@@ -26,8 +26,8 @@ worker_running = False
 cancel_flags = {}
 waiting_for = {}
 last_media = {}  # per user last media message store karega
-current_processing = {"user_id": None, "start_time": 0}  # currently encoding user
-queue_list = []  # (user_id, timestamp) for /queue tracking
+current_processing = {"user_id": None, "start_time": 0, "res": None}
+queue_list = []  # (user_id, timestamp, res_tag) for /queue tracking
 task_progress = {}  # user_id -> {phase, percent, speed, processed, total, eta, elapsed, filename, gid}
 
 async def set_bot_menu():
@@ -113,7 +113,7 @@ async def cancel_cb(client, callback_query):
     if str(uid) in callback_query.data:
         cancel_flags[uid] = True
         old_len = len(queue_list)
-        queue_list[:] = [(u, t) for u, t in queue_list if u != uid]
+        queue_list[:] = [(u, t, r) for u, t, r in queue_list if u != uid]
         if len(queue_list) < old_len:
             await callback_query.answer("✅ Queue se hata diya gaya!", show_alert=True)
         else:
@@ -123,7 +123,7 @@ async def cancel_cb(client, callback_query):
 async def cancel_cmd(client, message: Message):
     uid = message.from_user.id
     cancel_flags[uid] = True
-    queue_list[:] = [(u, t) for u, t in queue_list if u != uid]
+    queue_list[:] = [(u, t, r) for u, t, r in queue_list if u != uid]
     await message.reply_text("⚠️ Cancel signal sent.")
 
 async def progress_bar(current, total, action, message, start_time, edit_info, user_id):
@@ -357,6 +357,37 @@ async def store_media(client, message: Message):
     last_media[user_id] = message
 
 # --- CORE LOGIC (/encode or /ec COMMAND) ---
+ALL_RES = ["360p", "480p", "720p", "1080p"]
+
+def parse_ff_resolutions(message, target_message):
+    text = message.text or ""
+    parts = text.split()
+    ff_args = None
+    for i, p in enumerate(parts):
+        if p == "-ff" and i + 1 < len(parts):
+            ff_args = parts[i + 1]
+            break
+    if ff_args:
+        ff_args = ff_args.strip()
+        if ff_args.lower() == "all":
+            return list(ALL_RES)
+        raw = [x.strip().lower() for x in ff_args.replace(",", " ").split() if x.strip()]
+        out = []
+        for r in raw:
+            if not r.endswith("p"):
+                r += "p"
+            if r in ALL_RES:
+                out.append(r)
+        if out:
+            return out
+    cap = (target_message.caption or "").lower()
+    m = re.search(r'q\.\s*(\d+)\s*p?', cap)
+    if m:
+        r = m.group(1) + "p"
+        if r in ALL_RES:
+            return [r]
+    return None
+
 @app.on_message(filters.command(["encode", "ec"]))
 async def add_to_queue(client, message: Message):
     if not message.from_user:
@@ -370,7 +401,7 @@ async def add_to_queue(client, message: Message):
     if total_active >= Config.MAX_BOT_TASKS:
         return await message.reply_text(f"⛌ Bot pe **{Config.MAX_BOT_TASKS}** videos ki limit hai. Queue full hai — kuch complete hone ke baad try karein.")
     if Config.MAX_USER_TASKS is not None:
-        user_count = sum(1 for u, _ in queue_list if u == uid)
+        user_count = sum(1 for u, *_ in queue_list if u == uid)
         if user_count >= Config.MAX_USER_TASKS:
             return await message.reply_text(f"⛌ Aap ek baar mein sirf **{Config.MAX_USER_TASKS}** video(s) queue kar sakte hain.")
 
@@ -399,10 +430,17 @@ async def add_to_queue(client, message: Message):
     if target_message.document and not target_message.document.file_name.endswith(".srt"):
         return await message.reply_text("❌ Sirf video files ya .srt subtitle files hi encode ki ja sakti hain.")
 
-    await video_queue.put(target_message)
-    queue_list.append((uid, time.time()))
-    queue_pos = sum(1 for u, _ in queue_list if u != uid) + 1
-    await message.reply_text(f"📥 Video Queued. Aap queue mein position **#{queue_pos}** par hain.", reply_markup=get_cancel_button(uid))
+    res_list = parse_ff_resolutions(message, target_message)
+    if res_list is None:
+        s = get_settings(uid)
+        mode = s["mode"]
+        res_list = list(ALL_RES) if mode == "all" else [mode]
+
+    await video_queue.put((target_message, res_list))
+    res_tag = " ".join(res_list)
+    queue_list.append((uid, time.time(), res_tag))
+    queue_pos = sum(1 for u, _ in queue_list if u[0] != uid) + 1
+    await message.reply_text(f"📥 Queued (#{queue_pos}) | `{res_tag}`", reply_markup=get_cancel_button(uid))
 
     global worker_running
     if not worker_running:
@@ -411,7 +449,7 @@ async def add_to_queue(client, message: Message):
 
 async def video_worker(client):
     while not video_queue.empty():
-        message = await video_queue.get()
+        message, user_resolutions = await video_queue.get()
         user_id = message.from_user.id
         current_processing["user_id"] = user_id
         current_processing["start_time"] = time.time()
@@ -446,8 +484,7 @@ async def video_worker(client):
                 return await status.edit_text("❌ Downloaded file is not a valid video.")
             input_size = os.path.getsize(input_file) / (1024*1024)
             print(f"[INFO] Input: {input_file} | Size: {input_size:.1f}MB | Duration: {total_duration}s | {orig_w}x{orig_h}")
-            mode = settings["mode"]
-            resolutions = ["360p", "480p", "720p", "1080p"] if mode == "all" else [mode]
+            resolutions = user_resolutions
 
             for res in resolutions:
                 if cancel_flags.get(user_id): break
@@ -489,7 +526,7 @@ async def video_worker(client):
             if input_file and os.path.exists(input_file): os.remove(input_file)
             current_processing["user_id"] = None
             current_processing["start_time"] = 0
-            queue_list[:] = [(uid, t) for uid, t in queue_list if uid != user_id]
+            queue_list[:] = [(uid, t, r) for uid, t, r in queue_list if uid != user_id]
             if user_id in task_progress: del task_progress[user_id]
             video_queue.task_done()
     
@@ -633,11 +670,11 @@ async def queue_status(client, message: Message):
         lines.append(f"╰ **Cancel:** `/cancel`\n")
         task_count += 1
 
-    queued_tasks = [(uid, t) for uid, t in queue_list if uid == user_id]
+    queued_tasks = [(uid, t, r) for uid, t, r in queue_list if uid == user_id]
     if queued_tasks:
         lines.append(f"📦 **Queued — {len(queued_tasks)} video(s)**")
-        for i, (uid, t) in enumerate(queued_tasks, 1):
-            lines.append(f"├ **{i}.** `video_{uid}_{int(t)}`")
+        for i, (uid, t, r) in enumerate(queued_tasks, 1):
+            lines.append(f"├ **{i}.** `{r}` — `video_{uid}_{int(t)}`")
         lines.append("╰ Use `/cancel` to remove.\n")
 
     total_all = len(queue_list) + (1 if current_processing["user_id"] else 0)

@@ -14,5 +14,4 @@ AUTH_GC = int(os.environ.get("AUTH_GC", -1003192464251))
 
 MAX_BOT_TASKS = int(os.environ.get("MAX_BOT_TASKS", 20))
 
-_MAX_USER_TASKS = os.environ.get("MAX_USER_TASKS", None)
-MAX_USER_TASKS = int(_MAX_USER_TASKS) if _MAX_USER_TASKS is not None else None
+MAX_USER_TASKS = int(v) if (v := os.environ.get("MAX_USER_TASKS", "")) else None

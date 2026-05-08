@@ -14,3 +14,9 @@ class Config:
     MAX_BOT_TASKS = int(os.environ.get("MAX_BOT_TASKS", 20))
     MAX_USER_TASKS = int(v) if (v := os.environ.get("MAX_USER_TASKS", "")) else None
     DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "downloads/")
+
+    FFMPEG_CMDS = {
+        "480p": '-i {input} -vf scale=-2:480 -c:v libx264 -preset medium -crf 29 -c:a aac -b:a 64k -sn {output}',
+        "720p": '-i {input} -vf scale=-2:720 -c:v libx264 -preset medium -crf 27 -c:a aac -b:a 96k -sn {output}',
+        "1080p": '-i {input} -vf scale=-2:1080 -c:v libx264 -preset medium -crf 25 -c:a aac -b:a 128k -sn {output}',
+    }

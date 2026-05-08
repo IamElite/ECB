@@ -439,7 +439,7 @@ async def add_to_queue(client, message: Message):
     await video_queue.put((target_message, res_list))
     res_tag = " ".join(res_list)
     queue_list.append((uid, time.time(), res_tag))
-    queue_pos = sum(1 for u, _ in queue_list if u[0] != uid) + 1
+    queue_pos = sum(1 for u, _ in queue_list if u != uid) + 1
     await message.reply_text(f"📥 Queued (#{queue_pos}) | `{res_tag}`", reply_markup=get_cancel_button(uid))
 
     global worker_running

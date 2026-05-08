@@ -11,3 +11,8 @@ ADMIN_ID = int(os.environ.get("ADMIN_ID", 7074383232))
 UPSTREAM_REPO = os.environ.get("UPSTREAM_REPO", "https://github.com/IamElite/ECB")
 UPSTREAM_BRANCH = os.environ.get("UPSTREAM_BRANCH", "main")
 AUTH_GC = int(os.environ.get("AUTH_GC", -1003192464251))
+
+MAX_BOT_TASKS = int(os.environ.get("MAX_BOT_TASKS", 20))
+
+_MAX_USER_TASKS = os.environ.get("MAX_USER_TASKS", None)
+MAX_USER_TASKS = int(_MAX_USER_TASKS) if _MAX_USER_TASKS is not None else None

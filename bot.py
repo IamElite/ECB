@@ -15,7 +15,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from hypertg import HyperTGDownload, HyperTGUpload
 
 # 👇 Environment variables from Heroku config (via config.py)
-from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, UPSTREAM_REPO, UPSTREAM_BRANCH, AUTH_GC
+from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, UPSTREAM_REPO, UPSTREAM_BRANCH, AUTH_GC, MAX_BOT_TASKS, MAX_USER_TASKS
 
 app = Client("EncodeBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -336,8 +336,14 @@ async def add_to_queue(client, message: Message):
         return await message.reply_text("⛔ **Premium Required:** Video encode karne ke liye Premium Access hona chahiye. Admin se sampark karein.")
 
     uid = message.from_user.id
-    if uid in [u for u, _ in queue_list]:
-        return await message.reply_text("⏳ Aapki ek video pehle se queue mein hai. Pehle wali complete hone ke baad dobara try karein.")
+
+    total_active = len(queue_list)
+    if total_active >= MAX_BOT_TASKS:
+        return await message.reply_text(f"⛌ Bot pe **{MAX_BOT_TASKS}** videos ki limit hai. Queue full hai — kuch complete hone ke baad try karein.")
+    if MAX_USER_TASKS is not None:
+        user_count = sum(1 for u, _ in queue_list if u == uid)
+        if user_count >= MAX_USER_TASKS:
+            return await message.reply_text(f"⛌ Aap ek baar mein sirf **{MAX_USER_TASKS}** video(s) queue kar sakte hain.")
 
     target_message = None
 
@@ -556,26 +562,28 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
 @app.on_message(filters.command("queue"))
 async def queue_status(client, message: Message):
     user_id = message.from_user.id
+    total = len(queue_list)
+    limit_display = f"**{total}**/**{MAX_BOT_TASKS}**"
+    text = f"📋 **Queue Status**\n\nTotal: {limit_display} videos in queue"
     if current_processing["user_id"] == user_id:
         elapsed = time.time() - current_processing["start_time"]
-        text=f"📋 **Queue Status**\n\n⚙️ Aapki video abhi **encode ho rahi hai** ({format_time(int(elapsed))} se)"
-        remaining_queue = [uid for uid, _ in queue_list if uid != user_id]
-        if remaining_queue:
-            text+=f"\n\nAapke baad **{len(remaining_queue)}** aur video(s) queue mein hain."
-        await message.reply_text(text)
+        text += f"\n\n⚙️ Aapki video abhi **encode ho rahi hai** ({format_time(int(elapsed))} se)"
+        remaining = [uid for uid, _ in queue_list if uid != user_id]
+        if remaining:
+            text += f"\nAapke baad **{len(remaining)}** aur video(s) hain."
     else:
         pos = next((i+1 for i, (uid, _) in enumerate(queue_list) if uid == user_id), None)
         if pos is not None:
-            total_before = sum(1 for uid, _ in queue_list[:pos-1])
-            text=f"📋 **Queue Status**\n\nAapki position: **#{pos}** hai."
+            text += f"\n\nAapki position: **#{pos}**"
             if current_processing["user_id"] is not None:
                 elapsed = time.time() - current_processing["start_time"]
-                text+=f"\nCurrent encode: **{format_time(int(elapsed))}** se chal raha hai."
-            if total_before > 0:
-                text+=f"\nAapke aage **{total_before}** aur video(s) hain."
-            await message.reply_text(text)
+                text += f"\nCurrent encode: **{format_time(int(elapsed))}** se chal raha hai"
+            before = sum(1 for u, _ in queue_list[:pos-1])
+            if before > 0:
+                text += f"\nAapke aage **{before}** aur video(s) hain."
         else:
-            await message.reply_text("📋 Aapki koi bhi video abhi queue mein nahi hai. Video bhejkar `/encode` likhein.")
+            text += "\n\nAapki koi bhi video abhi queue mein nahi hai."
+    await message.reply_text(text)
 
 @app.on_message(filters.command(["restart"]) & filters.user(ADMIN_ID))
 async def restart_cmd(client, message: Message):

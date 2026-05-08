@@ -467,7 +467,7 @@ async def video_worker(client):
         try:
             status = await message.reply_text("⏳ Download Starting...", reply_markup=get_cancel_button(user_id))
             task_progress[user_id]["phase"] = "⬇️ Downloading"
-            hyper_dl = HyperTGDownload(app, num_parts=8)
+            hyper_dl = HyperTGDownload(app, num_parts=32)
             input_file = await hyper_dl.download_media(
                 message,
                 file_name=os.path.join(Config.DOWNLOAD_DIR, str(user_id), ""),

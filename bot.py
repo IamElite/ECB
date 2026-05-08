@@ -50,8 +50,8 @@ def get_settings(user_id):
     if user_id not in user_settings:
         user_settings[user_id] = {
             "srt": None, "thumb": None, "codec": "libx264", "preset": "fast", "mode": "all",
-            "crf": {"480p": 26, "720p": 24, "1080p": 22},
-            "audio": {"480p": "64k", "720p": "96k", "1080p": "128k"},
+            "crf": {"360p": 28, "480p": 26, "720p": 24, "1080p": 22},
+            "audio": {"360p": "48k", "480p": "64k", "720p": "96k", "1080p": "128k"},
             "_template": True
         }
     return user_settings[user_id]
@@ -176,10 +176,12 @@ def settings_keyboard(user_id):
         [InlineKeyboardButton(f"🎬 Mode: {s['mode'].upper()}", callback_data="settings_mode"),
          InlineKeyboardButton(f"💾 Codec: {codec_display}", callback_data="settings_codec"),
          InlineKeyboardButton(f"⚡ Preset: {s['preset'].upper()}", callback_data="settings_preset")],
-        [InlineKeyboardButton(f"📺 480p CRF: {s['crf']['480p']}", callback_data="settings_crf_480p"),
+        [InlineKeyboardButton(f"📺 360p CRF: {s['crf']['360p']}", callback_data="settings_crf_360p"),
+         InlineKeyboardButton(f"📺 480p CRF: {s['crf']['480p']}", callback_data="settings_crf_480p"),
          InlineKeyboardButton(f"📺 720p CRF: {s['crf']['720p']}", callback_data="settings_crf_720p"),
          InlineKeyboardButton(f"📺 1080p CRF: {s['crf']['1080p']}", callback_data="settings_crf_1080p")],
-        [InlineKeyboardButton(f"🔊 480p: {s['audio']['480p']}", callback_data="settings_audio_480p"),
+        [InlineKeyboardButton(f"🔊 360p: {s['audio']['360p']}", callback_data="settings_audio_360p"),
+         InlineKeyboardButton(f"🔊 480p: {s['audio']['480p']}", callback_data="settings_audio_480p"),
          InlineKeyboardButton(f"🔊 720p: {s['audio']['720p']}", callback_data="settings_audio_720p"),
          InlineKeyboardButton(f"🔊 1080p: {s['audio']['1080p']}", callback_data="settings_audio_1080p")],
         [InlineKeyboardButton("❌ Close", callback_data="settings_close")]
@@ -191,6 +193,7 @@ def settings_text(user_id):
     return (f"⚙️ **Your Premium Settings**\n\n"
             f"🎬 **Mode:** `{s['mode'].upper()}`\n"
             f"💾 **Codec:** `{codec_display}` | ⚡ **Preset:** `{s['preset'].upper()}`\n\n"
+            f"📺 `360p` → CRF `{s['crf']['360p']}` | Audio `{s['audio']['360p']}`\n"
             f"📺 `480p` → CRF `{s['crf']['480p']}` | Audio `{s['audio']['480p']}`\n"
             f"📺 `720p` → CRF `{s['crf']['720p']}` | Audio `{s['audio']['720p']}`\n"
             f"📺 `1080p` → CRF `{s['crf']['1080p']}` | Audio `{s['audio']['1080p']}`")
@@ -234,7 +237,7 @@ async def premium_settings_guard(client, message: Message):
         await message.reply_text(settings_text(user_id), reply_markup=settings_keyboard(user_id))
     
     elif cmd == "set_mode" and len(args) == 2:
-        if args[1].lower() in ["all", "480p", "720p", "1080p"]:
+        if args[1].lower() in ["all", "360p", "480p", "720p", "1080p"]:
             settings["mode"] = args[1].lower()
             settings["_template"] = False
             await message.reply_text(f"✅ Mode set to: **{args[1].upper()}**")
@@ -251,7 +254,7 @@ async def premium_settings_guard(client, message: Message):
         await message.reply_text(f"✅ Preset set to: **{args[1].lower()}**")
 
     elif cmd == "set_crf":
-        if len(args) == 3 and args[1].lower() in ["480p", "720p", "1080p"] and args[2].isdigit():
+        if len(args) == 3 and args[1].lower() in ["360p", "480p", "720p", "1080p"] and args[2].isdigit():
             settings["crf"][args[1].lower()] = int(args[2])
             settings["_template"] = False
             await message.reply_text(f"✅ {args[1].upper()} CRF set to: **{args[2]}**")
@@ -259,7 +262,7 @@ async def premium_settings_guard(client, message: Message):
             await message.reply_text("❌ Sahi Format: `/set_crf 480p 19`")
             
     elif cmd == "set_audio":
-        if len(args) == 3 and args[1].lower() in ["480p", "720p", "1080p"]:
+        if len(args) == 3 and args[1].lower() in ["360p", "480p", "720p", "1080p"]:
             settings["audio"][args[1].lower()] = args[2]
             settings["_template"] = False
             await message.reply_text(f"✅ {args[1].upper()} Audio set to: **{args[2]}**")
@@ -280,8 +283,8 @@ async def settings_callback(client, callback_query):
         await callback_query.answer()
 
     elif data == "settings_mode":
-        kb = setting_value_buttons("mode", ["all", "480p", "720p", "1080p"], user_id)
-        await callback_query.message.edit_text("🎬 **Select Encoding Mode:**\n\n`all` → teeno resolutions encode karega\n`480p` → sirf 480p encode karega", reply_markup=kb)
+        kb = setting_value_buttons("mode", ["all", "360p", "480p", "720p", "1080p"], user_id)
+        await callback_query.message.edit_text("🎬 **Select Encoding Mode:**\n\n`all` → sab resolutions encode karega\n`360p` → sirf 360p encode karega", reply_markup=kb)
         await callback_query.answer()
 
     elif data == "settings_codec":
@@ -444,7 +447,7 @@ async def video_worker(client):
             input_size = os.path.getsize(input_file) / (1024*1024)
             print(f"[INFO] Input: {input_file} | Size: {input_size:.1f}MB | Duration: {total_duration}s | {orig_w}x{orig_h}")
             mode = settings["mode"]
-            resolutions = ["480p", "720p", "1080p"] if mode == "all" else [mode]
+            resolutions = ["360p", "480p", "720p", "1080p"] if mode == "all" else [mode]
 
             for res in resolutions:
                 if cancel_flags.get(user_id): break
@@ -531,15 +534,15 @@ async def hyper_upload(client, chat_id, file_path, caption, w, h, duration, prog
 async def encode_video(input_file, res_key, status: Message, settings, user_id, total_duration):
     raw_name = os.path.splitext(os.path.basename(input_file))[0]
     import re as _re
-    clean_name = _re.sub(r'_(480p|720p|1080p|2160p|240p)$', '', raw_name, flags=_re.IGNORECASE)
-    clean_name = _re.sub(r'^(480p|720p|1080p|2160p|240p)_', '', clean_name, flags=_re.IGNORECASE)
-    clean_name = _re.sub(r'_(480p|720p|1080p|2160p|240p)_', '_', clean_name, flags=_re.IGNORECASE)
+    clean_name = _re.sub(r'_(360p|480p|720p|1080p|2160p|240p)$', '', raw_name, flags=_re.IGNORECASE)
+    clean_name = _re.sub(r'^(360p|480p|720p|1080p|2160p|240p)_', '', clean_name, flags=_re.IGNORECASE)
+    clean_name = _re.sub(r'_(360p|480p|720p|1080p|2160p|240p)_', '_', clean_name, flags=_re.IGNORECASE)
     output_file = f"{clean_name}_{res_key}_{user_id}.mp4" 
     
     if settings.get("_template", True):
         cmd = Config.FFMPEG_CMDS[res_key].format(input=input_file, output=output_file)
     else:
-        scales = {"480p": "scale=-2:480", "720p": "scale=-2:720", "1080p": "scale=-2:1080"}
+        scales = {"360p": "scale=-2:360", "480p": "scale=-2:480", "720p": "scale=-2:720", "1080p": "scale=-2:1080"}
         scale = scales[res_key]
         
         sub_file = settings["srt"]

@@ -15,12 +15,12 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from hypertg import HyperTGDownload, HyperTGUpload
 
 # 👇 Environment variables from Heroku config (via config.py)
-from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, UPSTREAM_REPO, UPSTREAM_BRANCH, AUTH_GC, MAX_BOT_TASKS, MAX_USER_TASKS
+from config import Config
 
-app = Client("EncodeBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("EncodeBot", api_id=Config.API_ID, api_hash=Config.API_HASH, bot_token=Config.BOT_TOKEN)
 
 user_settings = {}
-premium_users = [ADMIN_ID] # Admin automatically premium hai
+premium_users = [Config.ADMIN_ID] # Admin automatically premium hai
 video_queue = asyncio.Queue()
 worker_running = False
 cancel_flags = {}
@@ -65,12 +65,12 @@ def format_time(seconds):
     else: return f"{s}s"
 
 def is_premium(user_id, chat_id=None):
-    if chat_id == AUTH_GC:
+    if chat_id == Config.AUTH_GC:
         return True
     return user_id in premium_users
 
 # --- ADMIN COMMANDS ---
-@app.on_message(filters.command("add_pre") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("add_pre") & filters.user(Config.ADMIN_ID))
 async def add_prem(client, message: Message):
     if len(message.command) == 2:
         try:
@@ -83,11 +83,11 @@ async def add_prem(client, message: Message):
             else: await message.reply_text("Ye user pehle se premium hai.")
         except: await message.reply_text("Sahi format: `/add_pre 123456789`")
 
-@app.on_message(filters.command("remove_pre") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("remove_pre") & filters.user(Config.ADMIN_ID))
 async def rem_prem(client, message: Message):
     if len(message.command) == 2:
         u_id = int(message.command[1])
-        if u_id in premium_users and u_id != ADMIN_ID:
+        if u_id in premium_users and u_id != Config.ADMIN_ID:
             premium_users.remove(u_id)
             await message.reply_text(f"❌ User `{u_id}` ka Premium access hata diya gaya hai.")
         else: await message.reply_text("User list me nahi hai ya wo Admin hai.")
@@ -338,12 +338,12 @@ async def add_to_queue(client, message: Message):
     uid = message.from_user.id
 
     total_active = len(queue_list)
-    if total_active >= MAX_BOT_TASKS:
-        return await message.reply_text(f"⛌ Bot pe **{MAX_BOT_TASKS}** videos ki limit hai. Queue full hai — kuch complete hone ke baad try karein.")
-    if MAX_USER_TASKS is not None:
+    if total_active >= Config.MAX_BOT_TASKS:
+        return await message.reply_text(f"⛌ Bot pe **{Config.MAX_BOT_TASKS}** videos ki limit hai. Queue full hai — kuch complete hone ke baad try karein.")
+    if Config.MAX_USER_TASKS is not None:
         user_count = sum(1 for u, _ in queue_list if u == uid)
-        if user_count >= MAX_USER_TASKS:
-            return await message.reply_text(f"⛌ Aap ek baar mein sirf **{MAX_USER_TASKS}** video(s) queue kar sakte hain.")
+        if user_count >= Config.MAX_USER_TASKS:
+            return await message.reply_text(f"⛌ Aap ek baar mein sirf **{Config.MAX_USER_TASKS}** video(s) queue kar sakte hain.")
 
     target_message = None
 
@@ -563,7 +563,7 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
 async def queue_status(client, message: Message):
     user_id = message.from_user.id
     total = len(queue_list)
-    limit_display = f"**{total}**/**{MAX_BOT_TASKS}**"
+    limit_display = f"**{total}**/**{Config.MAX_BOT_TASKS}**"
     text = f"📋 **Queue Status**\n\nTotal: {limit_display} videos in queue"
     if current_processing["user_id"] == user_id:
         elapsed = time.time() - current_processing["start_time"]
@@ -585,7 +585,7 @@ async def queue_status(client, message: Message):
             text += "\n\nAapki koi bhi video abhi queue mein nahi hai."
     await message.reply_text(text)
 
-@app.on_message(filters.command(["restart"]) & filters.user(ADMIN_ID))
+@app.on_message(filters.command(["restart"]) & filters.user(Config.ADMIN_ID))
 async def restart_cmd(client, message: Message):
     await message.reply_text("🔄 Restarting bot... Code will auto-update from GitHub.")
     os.execl(sys.executable, sys.executable, "bot.py")

@@ -26,6 +26,8 @@ worker_running = False
 cancel_flags = {}
 waiting_for = {}
 last_media = {}  # per user last media message store karega
+current_processing = {"user_id": None, "start_time": 0}  # currently encoding user
+queue_list = []  # (user_id, timestamp) for /queue tracking
 
 async def set_bot_menu():
     await app.set_bot_commands([
@@ -39,6 +41,7 @@ async def set_bot_menu():
         BotCommand("set_preset", "Set Preset (Premium Only)"),
         BotCommand("set_crf", "Set CRF (Premium Only)"),
         BotCommand("set_audio", "Set Audio (Premium Only)"),
+        BotCommand("queue", "Queue position check karein 📋"),
         BotCommand("cancel", "Process cancel karein ❌")
     ])
 
@@ -99,13 +102,21 @@ async def my_status(client, message: Message):
 # --- CANCEL & PROGRESS BARS ---
 @app.on_callback_query(filters.regex(r"^cancel_"))
 async def cancel_cb(client, callback_query):
-    if str(callback_query.from_user.id) in callback_query.data:
-        cancel_flags[callback_query.from_user.id] = True
-        await callback_query.answer("⚠️ Cancelling task... Please wait.", show_alert=True)
+    uid = callback_query.from_user.id
+    if str(uid) in callback_query.data:
+        cancel_flags[uid] = True
+        old_len = len(queue_list)
+        queue_list[:] = [(u, t) for u, t in queue_list if u != uid]
+        if len(queue_list) < old_len:
+            await callback_query.answer("✅ Queue se hata diya gaya!", show_alert=True)
+        else:
+            await callback_query.answer("⚠️ Cancelling task... Please wait.", show_alert=True)
 
 @app.on_message(filters.command("cancel"))
 async def cancel_cmd(client, message: Message):
-    cancel_flags[message.from_user.id] = True
+    uid = message.from_user.id
+    cancel_flags[uid] = True
+    queue_list[:] = [(u, t) for u, t in queue_list if u != uid]
     await message.reply_text("⚠️ Cancel signal sent.")
 
 async def progress_bar(current, total, action, message, start_time, edit_info, user_id):
@@ -324,6 +335,10 @@ async def add_to_queue(client, message: Message):
     if not is_premium(message.from_user.id, message.chat.id):
         return await message.reply_text("⛔ **Premium Required:** Video encode karne ke liye Premium Access hona chahiye. Admin se sampark karein.")
 
+    uid = message.from_user.id
+    if uid in [u for u, _ in queue_list]:
+        return await message.reply_text("⏳ Aapki ek video pehle se queue mein hai. Pehle wali complete hone ke baad dobara try karein.")
+
     target_message = None
 
     # Agar kisi message ko reply kiya gaya hai, to us message ko check karo
@@ -332,17 +347,17 @@ async def add_to_queue(client, message: Message):
         if rmsg.video or (rmsg.document and rmsg.document.file_name):
             target_message = rmsg
     # Agar reply nahi hai, to user ke last sent media ko check karo
-    elif message.from_user.id in last_media:
-        target_message = last_media[message.from_user.id]
+    elif uid in last_media:
+        target_message = last_media[uid]
 
     if not target_message:
         return await message.reply_text("❌ Pehle video bhejein, fir `/encode` ya `/ec` command dein (ya video ko reply karke command use karein).")
 
     # Subtitle file hai to save karo
     if target_message.document and target_message.document.file_name and target_message.document.file_name.endswith(".srt"):
-        s = get_settings(message.from_user.id)
+        s = get_settings(uid)
         if s["srt"] and os.path.exists(s["srt"]): os.remove(s["srt"])
-        s["srt"] = await target_message.download(file_name=f"sub_{message.from_user.id}.srt")
+        s["srt"] = await target_message.download(file_name=f"sub_{uid}.srt")
         return await message.reply_text("✅ Subtitle Saved!")
 
     # Video document hai (bina .srt extension ke) to error do
@@ -350,7 +365,9 @@ async def add_to_queue(client, message: Message):
         return await message.reply_text("❌ Sirf video files ya .srt subtitle files hi encode ki ja sakti hain.")
 
     await video_queue.put(target_message)
-    await message.reply_text(f"📥 Video Queued. Wait for your turn...", reply_markup=get_cancel_button(message.from_user.id))
+    queue_list.append((uid, time.time()))
+    queue_pos = sum(1 for u, _ in queue_list if u != uid) + 1
+    await message.reply_text(f"📥 Video Queued. Aap queue mein position **#{queue_pos}** par hain.", reply_markup=get_cancel_button(uid))
 
     global worker_running
     if not worker_running:
@@ -361,6 +378,8 @@ async def video_worker(client):
     while not video_queue.empty():
         message = await video_queue.get()
         user_id = message.from_user.id
+        current_processing["user_id"] = user_id
+        current_processing["start_time"] = time.time()
         settings = get_settings(user_id)
         cancel_flags[user_id] = False
         input_file = None
@@ -423,6 +442,9 @@ async def video_worker(client):
             else: await message.reply_text(f"❌ Error: {e}")
         finally:
             if input_file and os.path.exists(input_file): os.remove(input_file)
+            current_processing["user_id"] = None
+            current_processing["start_time"] = 0
+            queue_list[:] = [(uid, t) for uid, t in queue_list if uid != user_id]
             video_queue.task_done()
     
     global worker_running
@@ -530,6 +552,30 @@ async def encode_video(input_file, res_key, status: Message, settings, user_id, 
     out_size = os.path.getsize(output_file) / (1024*1024)
     print(f"[FFMPEG] {res_key} done — {out_size:.1f}MB")
     return output_file
+
+@app.on_message(filters.command("queue"))
+async def queue_status(client, message: Message):
+    user_id = message.from_user.id
+    if current_processing["user_id"] == user_id:
+        elapsed = time.time() - current_processing["start_time"]
+        text=f"📋 **Queue Status**\n\n⚙️ Aapki video abhi **encode ho rahi hai** ({format_time(int(elapsed))} se)"
+        remaining_queue = [uid for uid, _ in queue_list if uid != user_id]
+        if remaining_queue:
+            text+=f"\n\nAapke baad **{len(remaining_queue)}** aur video(s) queue mein hain."
+        await message.reply_text(text)
+    else:
+        pos = next((i+1 for i, (uid, _) in enumerate(queue_list) if uid == user_id), None)
+        if pos is not None:
+            total_before = sum(1 for uid, _ in queue_list[:pos-1])
+            text=f"📋 **Queue Status**\n\nAapki position: **#{pos}** hai."
+            if current_processing["user_id"] is not None:
+                elapsed = time.time() - current_processing["start_time"]
+                text+=f"\nCurrent encode: **{format_time(int(elapsed))}** se chal raha hai."
+            if total_before > 0:
+                text+=f"\nAapke aage **{total_before}** aur video(s) hain."
+            await message.reply_text(text)
+        else:
+            await message.reply_text("📋 Aapki koi bhi video abhi queue mein nahi hai. Video bhejkar `/encode` likhein.")
 
 @app.on_message(filters.command(["restart"]) & filters.user(ADMIN_ID))
 async def restart_cmd(client, message: Message):

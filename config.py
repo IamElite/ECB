@@ -18,8 +18,8 @@ class Config:
     UPLOAD_WORKERS = int(os.environ.get("UPLOAD_WORKERS", 6))
 
     FFMPEG_CMDS = {
-        "360p": '-i "{input}" -vf scale=-2:360 -c:v libx264 -preset medium -crf 30 -c:a aac -b:a 48k -sn -movflags +faststart "{output}"',
-        "480p": '-i "{input}" -vf scale=-2:480 -c:v libx265 -preset medium -crf 29 -c:a libopus -b:a 48k -sn "{output}"',
-        "720p": '-i "{input}" -vf scale=-2:720 -c:v libx265 -preset medium -crf 29 -c:a libopus -b:a 56k -sn "{output}"',
-        "1080p": '-i "{input}" -vf scale=-2:1080 -c:v libx265 -preset medium -crf 28 -c:a libopus -b:a 64k -sn "{output}"',
+        "360p": 'ffmpeg -y -i "{input}" -vf scale=-2:360 -c:v libx264 -preset medium -crf 30 -c:a aac -b:a 48k -sn -movflags +faststart "{output}"',
+        "480p": 'ffmpeg -y -i "{input}" -vf scale=-2:480 -c:v libx265 -preset medium -crf 29 -c:a libopus -b:a 48k -sn "{output}"',
+        "720p": 'ffmpeg -y -i "{input}" -vf scale=-2:720 -c:v libx265 -preset medium -crf 29 -c:a libopus -b:a 56k -sn "{output}"',
+        "1080p": 'ffmpeg -y -i "{input}" -vf scale=-2:1080 -c:v libx265 -preset medium -crf 28 -c:a libopus -b:a 64k -sn "{output}"',
     }

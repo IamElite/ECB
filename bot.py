@@ -487,14 +487,16 @@ async def video_worker(client):
             resolutions = user_resolutions
             total_res = len(resolutions)
             task_progress[user_id]["phase"] = f"⚙️ Encoding 0/{total_res}"
+            enc_sem = asyncio.Semaphore(2)
 
             async def encode_one(res):
-                task_progress[user_id]["phase"] = f"⚙️ Encoding {res}"
-                try:
-                    out = await encode_video(input_file, res, None, settings, user_id, total_duration)
-                    return res, out, None
-                except Exception as e:
-                    return res, None, e
+                async with enc_sem:
+                    task_progress[user_id]["phase"] = f"⚙️ Encoding {res}"
+                    try:
+                        out = await encode_video(input_file, res, None, settings, user_id, total_duration)
+                        return res, out, None
+                    except Exception as e:
+                        return res, None, e
 
             enc_tasks = [encode_one(r) for r in resolutions]
             done_enc = 0

@@ -493,7 +493,7 @@ async def video_worker(client):
                 async with enc_sem:
                     task_progress[user_id]["phase"] = f"⚙️ Encoding {res}"
                     try:
-                        out = await encode_video(input_file, res, None, settings, user_id, total_duration)
+                        out = await encode_video(input_file, res, status, settings, user_id, total_duration)
                         return res, out, None
                     except Exception as e:
                         return res, None, e

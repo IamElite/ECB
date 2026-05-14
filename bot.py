@@ -487,7 +487,7 @@ async def video_worker(client):
             resolutions = user_resolutions
             total_res = len(resolutions)
             task_progress[user_id]["phase"] = f"⚙️ Encoding 0/{total_res}"
-            enc_sem = asyncio.Semaphore(2)
+            enc_sem = asyncio.Semaphore(1)
 
             async def encode_one(res):
                 async with enc_sem:
